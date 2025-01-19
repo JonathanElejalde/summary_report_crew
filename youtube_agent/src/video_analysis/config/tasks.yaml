@@ -1,0 +1,21 @@
+video_query_task:
+  description: "Search for videos and gather comprehensive metadata including comments and captions."
+  expected_output: "A list of video metadata including full transcripts and comments for each video."
+  tools_needed: ["youtube_search", "metadata_extraction"]
+  priority: 1
+
+comment_filter_task:
+  description: "Analyze and filter comments from all videos to identify valuable insights and discussions."
+  expected_output: "A curated list of meaningful comments grouped by themes and relevance, with spam and low-quality content removed."
+  priority: 2
+
+caption_summarization_task:
+  description: "Create a comprehensive summary of content from all video transcripts, identifying key themes and insights."
+  expected_output: "A detailed summary of video content with key points and themes identified across all videos."
+  priority: 2
+
+final_report_task:
+  description: "Generate a comprehensive analysis combining caption summaries and comment insights."
+  expected_output: "A detailed report that synthesizes video content, user discussions, and overall trends."
+  priority: 3
+

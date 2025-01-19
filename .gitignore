@@ -1,0 +1,9 @@
+.env
+.DS_Store
+agentops.log
+
+venv/
+__pycache__/
+youtube_agent/**/__pycache__/
+
+
