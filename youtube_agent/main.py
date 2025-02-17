@@ -55,39 +55,6 @@ def collect_video_data(url: str) -> Tuple[str, List[Dict[str, Any]]]:
     try:
         comments = YouTubeComments().get_comments(url, max_comments=200)
         print(f"Retrieved {len(comments)} comments")
-        
-        # Add test spam comments
-        spam_comments = [
-            {
-                "text": "🔥 Make money fast! Visit www.scam-website.com to learn how! 💰💰💰",
-                "likes": 0
-            },
-            {
-                "text": "Check out my channel! Sub4Sub! youtube.com/user/spammer",
-                "likes": 1
-            },
-            {
-                "text": "First! 👍",
-                "likes": 2
-            },
-            {
-                "text": "🎁 FREE IPHONE GIVEAWAY! Click here: bit.ly/fake-giveaway",
-                "likes": 0
-            },
-            {
-                "text": "Great video! Want to be YouTube friends? Subscribe to my channel!",
-                "likes": 1
-            }
-        ]
-        
-        # Insert spam comments randomly throughout the list
-        import random
-        for spam in spam_comments:
-            insert_position = random.randint(0, len(comments))
-            comments.insert(insert_position, spam)
-            
-        print(f"Added {len(spam_comments)} test spam comments for filtering verification")
-        
     except Exception as e:
         print(f"Warning: Failed to get comments: {e}")
         comments = []
