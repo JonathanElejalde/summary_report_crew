@@ -1,0 +1,4 @@
+langchain-ollama==0.2.2
+pytubefix==8.12.0
+whisper
+agentops==0.3.26

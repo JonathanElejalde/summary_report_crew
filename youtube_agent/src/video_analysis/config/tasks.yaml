@@ -1,21 +1,89 @@
-video_query_task:
-  description: "Search for videos and gather comprehensive metadata including comments and captions."
-  expected_output: "A list of video metadata including full transcripts and comments for each video."
-  tools_needed: ["youtube_search", "metadata_extraction"]
-  priority: 1
+analyze_comments_task:
+  description: >
+    Analyze and filter the provided comments:
+    {comments}
 
-comment_filter_task:
-  description: "Analyze and filter comments from all videos to identify valuable insights and discussions."
-  expected_output: "A curated list of meaningful comments grouped by themes and relevance, with spam and low-quality content removed."
-  priority: 2
+    1. Remove spam, irrelevant, or low-quality comments
+    2. Identify comments that provide valuable insights
+    3. Focus on comments relevant to the video content
+    4. Organize comments by relevance and importance
+    5. Consider both comment text and number of likes
+    6. Aim to keep only the most meaningful 20-30% of comments
 
-caption_summarization_task:
-  description: "Create a comprehensive summary of content from all video transcripts, identifying key themes and insights."
-  expected_output: "A detailed summary of video content with key points and themes identified across all videos."
-  priority: 2
+    Format your response as a JSON array of objects, each with:
+    - text: The comment text
+    - likes: Number of likes
+    - relevance: Your assessment (high/medium/low)
+    - insight: Brief note on why this comment is valuable
+  expected_output: >
+    A JSON array of filtered and analyzed comments with metadata.
+  agent: comment_analyzer
 
-final_report_task:
-  description: "Generate a comprehensive analysis combining caption summaries and comment insights."
-  expected_output: "A detailed report that synthesizes video content, user discussions, and overall trends."
-  priority: 3
+create_report_task:
+  description: >
+    Create a comprehensive analysis report of the video content based on:
+    - Transcript: {transcript}
+    - Filtered comments from analyze_comments_task
+
+    # Video Analysis Report
+    ## Content Overview
+    [Provide a comprehensive overview of the video's content and purpose]
+
+    ## Key Themes and Topics
+    [Identify and analyze main themes, topics, and arguments presented]
+
+    ## Main Arguments/Points
+    [Break down the key arguments or points made in the video]
+
+    ## Community Reception and Insights
+    [Analyze the community's response using the filtered comments]
+
+    ## Notable Quotes or Moments
+    [Highlight significant quotes or moments from the transcript]
+
+    Always:
+    - Use proper markdown formatting
+    - Include relevant quotes from transcript when appropriate
+    - Reference community insights from analyzed comments
+    - Maintain professional tone and clear structure
+    - Be comprehensive and detailed in your analysis
+  expected_output: >
+    A well-formatted markdown file containing the detailed video analysis report.
+  agent: report_analyzer
+  dependencies: ["analyze_comments_task"]
+
+create_summary_task:
+  description: >
+    Create a focused, concise summary of the video content based on:
+    - Transcript: {transcript}
+    - Filtered comments from analyze_comments_task
+
+    Your goal is to distill the essential information into a clear, actionable summary.
+    Focus on what matters most to someone who wants to quickly understand the video's value.
+
+    Structure your summary as follows:
+
+    # Video Analysis Summary
+    ## Core Message
+    [One or two sentences that capture the main point or purpose of the video]
+
+    ## Key Takeaways
+    - [Most important point with supporting evidence]
+    - [Second most important point with supporting evidence]
+    - [Third most important point with supporting evidence]
+    (Maximum 5 key points, minimum 3)
+
+    ## Community Reception
+    [2-3 sentences synthesizing the overall community response and most valuable insights from comments]
+
+    Always:
+    - Be concise and direct
+    - Use bullet points for key takeaways
+    - Include specific examples or quotes to support main points
+    - Highlight practical implications or actionable insights
+    - Maintain clarity and accessibility for quick understanding
+  expected_output: >
+    A well-formatted markdown file containing a focused video summary.
+  agent: summary_analyzer
+  dependencies: ["analyze_comments_task"]
 
