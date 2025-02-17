@@ -6,4 +6,11 @@ venv/
 __pycache__/
 youtube_agent/**/__pycache__/
 
+youtube_agent/documents/
+youtube_agent/knowledge/
 
+.specstory
+crewai.md
+todos.md
+
+docs/
