@@ -38,8 +38,26 @@ def get_analysis_type() -> str:
 
 def collect_video_data(url: str) -> Tuple[str, List[Dict[str, Any]]]:
     """
-    Collect transcript and comments for a video.
-    Returns a tuple of (transcript, comments).
+    Collect transcript and comments data for a YouTube video.
+    
+    This function handles both transcript extraction and comment collection.
+    For transcripts, it first attempts to get official captions and falls back
+    to Whisper transcription if needed. For comments, it collects up to the
+    specified maximum number of comments.
+    
+    Args:
+        url (str): The YouTube video URL to analyze
+        
+    Returns:
+        Tuple[str, List[Dict[str, Any]]]: A tuple containing:
+            - str: The video transcript text
+            - List[Dict[str, Any]]: List of comment dictionaries, each containing:
+                - text (str): The comment text
+                - likes (int): Number of likes on the comment
+                
+    Raises:
+        RuntimeError: If transcript extraction fails
+        ValueError: If the URL is invalid
     """
     print("\n📥 Collecting video data...")
     
@@ -63,8 +81,21 @@ def collect_video_data(url: str) -> Tuple[str, List[Dict[str, Any]]]:
 
 def main():
     """
-    Main function to run the YouTube video analysis crew.
-    Collects video data first, then uses the crew for analysis.
+    Main function to run the YouTube video analysis tool.
+    
+    This function orchestrates the entire analysis process:
+    1. Loads environment variables and initializes tracking
+    2. Collects user input (video URL and analysis type)
+    3. Extracts video data (transcript and comments)
+    4. Initializes and runs the AI analysis crew
+    5. Displays and saves the analysis results
+    
+    The function handles the complete workflow from user input to final output,
+    including error handling and progress display.
+        
+    Output:
+        - Saves analysis results to docs/report/ or docs/summary/
+        - Displays analysis results in the console
     """
     # Load environment variables
     load_dotenv()

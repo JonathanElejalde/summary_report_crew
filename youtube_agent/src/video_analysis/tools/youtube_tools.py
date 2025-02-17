@@ -9,7 +9,20 @@ import torch
 import re
 
 def extract_video_id(url: str) -> Optional[str]:
-    """Extract video ID from various forms of YouTube URLs."""
+    """
+    Extract video ID from various forms of YouTube URLs.
+    
+    Supports multiple URL formats including:
+    - Standard watch URLs (youtube.com/watch?v=VIDEO_ID)
+    - Shortened URLs (youtu.be/VIDEO_ID)
+    - Embed URLs (youtube.com/embed/VIDEO_ID)
+    
+    Args:
+        url (str): The YouTube URL to extract ID from
+        
+    Returns:
+        Optional[str]: The video ID if found, None if no valid ID could be extracted
+    """
     patterns = [
         r'(?:v=|/v/|youtu\.be/|/embed/)([^&?\n]+)',  # Standard, shortened and embed URLs
         r'(?:watch\?|youtube\.com/)(?:.*v=|v/|embed/)([^&?\n]+)',  # Watch URLs
@@ -22,10 +35,28 @@ def extract_video_id(url: str) -> Optional[str]:
     return None
 
 class YouTubeComments:
-    """Class for extracting and managing YouTube comments"""
+    """
+    Class for extracting and managing YouTube comments.
+    
+    This class handles authentication with the YouTube API and provides
+    methods to fetch and process video comments. It can be initialized
+    with an API key or use one from environment variables.
+    
+    Attributes:
+        api_key (str): The YouTube API key for authentication
+    """
     
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize with optional API key, otherwise uses environment variable."""
+        """
+        Initialize with optional API key, otherwise uses environment variable.
+        
+        Args:
+            api_key (Optional[str]): YouTube API key. If None, will try to get from
+                                   YOUTUBE_API_KEY environment variable
+                                   
+        Raises:
+            ValueError: If no API key is provided and none found in environment
+        """
         self.api_key = api_key or os.getenv("YOUTUBE_API_KEY")
         if not self.api_key:
             raise ValueError("YouTube API key is required. Set YOUTUBE_API_KEY environment variable or pass it to the constructor.")
@@ -34,12 +65,22 @@ class YouTubeComments:
         """
         Get comments from a YouTube video.
         
+        This method fetches comments using the YouTube API, handling pagination
+        to collect up to the specified maximum number of comments. Comments
+        are ordered by relevance.
+        
         Args:
-            video_url: The URL of the YouTube video
-            max_comments: Maximum number of comments to retrieve (default: 200)
+            video_url (str): The URL of the YouTube video
+            max_comments (int): Maximum number of comments to retrieve (default: 200)
             
         Returns:
-            List of comments with text and likes count
+            List[Dict[str, Any]]: List of comment dictionaries, each containing:
+                - text (str): The comment text
+                - likes (int): Number of likes on the comment
+                
+        Raises:
+            ValueError: If the video URL is invalid
+            RuntimeError: If there's an error fetching comments
         """
         video_id = extract_video_id(video_url)
         if not video_id:
@@ -81,22 +122,47 @@ class YouTubeComments:
             raise RuntimeError(f"Error getting comments: {e}")
 
 class YouTubeTranscript:
-    """Class for extracting and managing YouTube video transcripts"""
+    """
+    Class for extracting and managing YouTube video transcripts.
+    
+    This class provides functionality to extract video transcripts using two methods:
+    1. Official YouTube captions (preferred method)
+    2. Whisper audio transcription (fallback method)
+    
+    The class automatically handles the process of attempting official captions first
+    and falling back to Whisper transcription if needed.
+    
+    Attributes:
+        model (whisper.Whisper): The loaded Whisper model for transcription
+    """
     
     def __init__(self, model_size: str = "medium", device: Optional[str] = None):
         """
         Initialize with Whisper model configuration.
         
         Args:
-            model_size: Whisper model size (tiny, base, small, medium, large)
-            device: Device to use (cuda if available, otherwise cpu)
+            model_size (str): Whisper model size (tiny, base, small, medium, large).
+                            Larger models are more accurate but slower and use more memory.
+            device (Optional[str]): Device to use for Whisper model (cuda/cpu).
+                                  If None, will use CUDA if available.
         """
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = whisper.load_model(model_size, device=device)
 
     def _parse_srt_captions(self, srt_content: str) -> Optional[str]:
-        """Parse SRT format captions and extract only the text."""
+        """
+        Parse SRT format captions and extract only the text.
+        
+        Converts SRT formatted captions into plain text by removing timestamps
+        and subtitle numbers while preserving the actual caption text.
+        
+        Args:
+            srt_content (str): Raw SRT formatted caption content
+            
+        Returns:
+            Optional[str]: Extracted plain text from captions, or None if parsing fails
+        """
         try:
             lines = srt_content.strip().split('\n')
             text_lines = []
@@ -121,7 +187,21 @@ class YouTubeTranscript:
             return None
 
     def _get_youtube_captions(self, yt: YouTube) -> Optional[str]:
-        """Try to get official YouTube captions."""
+        """
+        Try to get official YouTube captions.
+        
+        Attempts to fetch official captions in the following language priority:
+        1. English (en)
+        2. Auto-generated English (a.en)
+        3. Spanish (es)
+        4. Auto-generated Spanish (a.es)
+        
+        Args:
+            yt (YouTube): Initialized YouTube object for the video
+            
+        Returns:
+            Optional[str]: Caption text if found and successfully parsed, None otherwise
+        """
         try:
             captions = yt.captions
             if not captions:
@@ -151,7 +231,25 @@ class YouTubeTranscript:
             return None
 
     def _transcribe_with_whisper(self, video_id: str, yt: YouTube) -> Optional[str]:
-        """Transcribe audio using Whisper when captions are not available."""
+        """
+        Transcribe audio using Whisper when captions are not available.
+        
+        This method:
+        1. Downloads the audio stream from the video
+        2. Saves it to a temporary file
+        3. Uses Whisper to transcribe the audio
+        4. Cleans up temporary files
+        
+        Args:
+            video_id (str): YouTube video ID
+            yt (YouTube): Initialized YouTube object for the video
+            
+        Returns:
+            Optional[str]: Transcribed text if successful
+            
+        Raises:
+            RuntimeError: If audio stream is not found or transcription fails
+        """
         audio_stream = yt.streams.filter(only_audio=True, file_extension='mp4').order_by('abr').desc().first()
         if not audio_stream:
             raise RuntimeError("No audio stream found for video")
@@ -173,11 +271,18 @@ class YouTubeTranscript:
         """
         Get transcript for a YouTube video.
         
+        This method orchestrates the transcript extraction process:
+        1. First attempts to get official YouTube captions
+        2. If no captions are available, falls back to Whisper transcription
+        3. Handles various error cases and provides appropriate error messages
+        
         Args:
-            video_url: The URL of the YouTube video
+            video_url (str): The URL of the YouTube video
             
         Returns:
-            Dictionary with source (youtube_captions/whisper/error) and text
+            Dict[str, str]: Dictionary containing:
+                - source (str): Source of transcript ('youtube_captions'/'whisper'/'error')
+                - text (str): The transcript text or error message
         
         Raises:
             ValueError: If the video URL is invalid
