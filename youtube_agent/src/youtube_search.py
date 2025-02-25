@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -50,7 +50,8 @@ class YouTubeSearch:
             "month" -> (current datetime - 30 days) in ISO format
             "year" -> (current datetime - 365 days) in ISO format
         """
-        now = datetime.utcnow()
+        # Replace deprecated datetime.utcnow() with timezone-aware alternative
+        now = datetime.now(timezone.utc)
         
         if date_filter == "24 hours" or date_filter.lower() == "today":
             published_after = now - timedelta(days=1)
@@ -64,9 +65,35 @@ class YouTubeSearch:
             # Default to 24 hours if the date filter is not recognized
             published_after = now - timedelta(days=1)
             
-        return published_after.isoformat("T") + "Z"
+        return published_after.isoformat()
     
-    def search_videos(self, query: str, date_filter: str = "24 hours", max_results: int = 10) -> List[Dict[str, Any]]:
+    def _parse_duration_to_seconds(self, duration: str) -> int:
+        """
+        Parse ISO 8601 duration format to seconds.
+        
+        Args:
+            duration (str): Duration in ISO 8601 format (e.g., 'PT1H30M15S')
+            
+        Returns:
+            int: Duration in seconds
+        """
+        import re
+        import datetime
+        
+        # Extract hours, minutes, seconds from ISO 8601 duration
+        hours = re.search(r'(\d+)H', duration)
+        minutes = re.search(r'(\d+)M', duration)
+        seconds = re.search(r'(\d+)S', duration)
+        
+        hours = int(hours.group(1)) if hours else 0
+        minutes = int(minutes.group(1)) if minutes else 0
+        seconds = int(seconds.group(1)) if seconds else 0
+        
+        return hours * 3600 + minutes * 60 + seconds
+    
+    
+    def search_videos(self, query: str, date_filter: str = "24 hours", max_results: int = 10, 
+                     video_duration: str = "any") -> List[Dict[str, Any]]:
         """
         Search for YouTube videos based on query and date filter.
         
@@ -77,16 +104,11 @@ class YouTubeSearch:
             query (str): Search query for finding videos
             date_filter (str): Time frame filter (e.g., "24 hours", "week", "month")
             max_results (int): Maximum number of results to return (default: 10)
+            video_duration (str): Duration filter ('any', 'short', 'medium', 'long')
+                                 short: < 4 min, medium: 4-20 min, long: > 20 min
             
         Returns:
-            List[Dict[str, Any]]: List of video metadata dictionaries, each containing:
-                - id (str): Video ID
-                - url (str): Full YouTube video URL
-                - title (str): Video title
-                - channel_title (str): Channel name
-                - published_at (str): Publication date/time
-                - description (str): Video description
-                - thumbnail_url (str): URL of video thumbnail
+            List[Dict[str, Any]]: List of video metadata dictionaries
                 
         Raises:
             HttpError: If there's an error with the YouTube API request
@@ -102,6 +124,7 @@ class YouTubeSearch:
                 q=query,
                 part="snippet",
                 type="video",
+                videoDuration=video_duration,  # Add duration filter
                 order="relevance",
                 publishedAfter=published_after,
                 maxResults=max_results
@@ -130,24 +153,26 @@ class YouTubeSearch:
             print(f"An HTTP error occurred: {e}")
             return []
     
-    def get_video_statistics(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    def get_video_details(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """
-        Get statistics for a list of video IDs.
+        Get combined statistics and content details for a list of video IDs.
         
-        Fetches view count, like count, comment count, and other statistics
-        for the specified videos.
+        This method combines what was previously separate calls for statistics and duration
+        into a single API call to reduce API usage costs.
         
         Args:
             video_ids (List[str]): List of YouTube video IDs
             
         Returns:
-            Dict[str, Dict[str, Any]]: Dictionary mapping video IDs to their statistics:
+            Dict[str, Dict[str, Any]]: Dictionary mapping video IDs to their details:
                 {
                     "video_id": {
                         "view_count": int,
                         "like_count": int,
                         "comment_count": int,
-                        "favorite_count": int
+                        "favorite_count": int,
+                        "duration": str,
+                        "duration_seconds": int
                     },
                     ...
                 }
@@ -161,46 +186,53 @@ class YouTubeSearch:
             # Split video IDs into chunks of 50 (API limit)
             video_id_chunks = [video_ids[i:i+50] for i in range(0, len(video_ids), 50)]
             
-            all_stats = {}
+            all_details = {}
             for chunk in video_id_chunks:
-                # Execute videos list request
+                # Execute videos list request with both statistics and contentDetails parts
                 videos_response = youtube.videos().list(
-                    part="statistics",
+                    part="statistics,contentDetails",
                     id=",".join(chunk)
                 ).execute()
                 
-                # Extract statistics for each video
+                # Extract details for each video
                 for item in videos_response.get("items", []):
                     video_id = item["id"]
                     statistics = item["statistics"]
+                    content_details = item["contentDetails"]
                     
-                    all_stats[video_id] = {
+                    # Parse duration
+                    duration_str = content_details["duration"]
+                    duration_seconds = self._parse_duration_to_seconds(duration_str)
+                    
+                    all_details[video_id] = {
                         "view_count": int(statistics.get("viewCount", 0)),
                         "like_count": int(statistics.get("likeCount", 0)),
                         "comment_count": int(statistics.get("commentCount", 0)),
-                        "favorite_count": int(statistics.get("favoriteCount", 0))
+                        "favorite_count": int(statistics.get("favoriteCount", 0)),
+                        "duration": duration_str,
+                        "duration_seconds": duration_seconds
                     }
             
-            return all_stats
+            return all_details
             
         except HttpError as e:
             print(f"An HTTP error occurred: {e}")
             return {}
     
-    def filter_videos_by_views(self, videos: List[Dict[str, Any]], min_views: int = 5000) -> List[Dict[str, Any]]:
+    def filter_videos(self, videos: List[Dict[str, Any]], min_views: int = 5000, 
+                     min_duration_seconds: int = 9000) -> List[Dict[str, Any]]:
         """
-        Filter videos by minimum view count.
+        Filter videos by minimum view count and duration in one operation.
         
-        This method fetches statistics for the provided videos and filters
-        out those with fewer views than the specified minimum.
+        This method combines what was previously separate filtering methods to reduce API calls.
         
         Args:
             videos (List[Dict[str, Any]]): List of video metadata dictionaries
             min_views (int): Minimum view count for filtering (default: 5000)
+            min_duration_seconds (int): Minimum duration in seconds (default: 9000 seconds = 2.5 hours)
             
         Returns:
-            List[Dict[str, Any]]: Filtered list of video metadata dictionaries,
-                                 with statistics added to each video
+            List[Dict[str, Any]]: Filtered list of video metadata dictionaries
         """
         if not videos:
             return []
@@ -208,23 +240,27 @@ class YouTubeSearch:
         # Extract video IDs
         video_ids = [video["id"] for video in videos]
         
-        # Get statistics for all videos
-        statistics = self.get_video_statistics(video_ids)
+        # Get combined details for all videos
+        details = self.get_video_details(video_ids)
         
-        # Filter videos by view count and add statistics
+        # Filter videos by both view count and duration
         filtered_videos = []
         for video in videos:
             video_id = video["id"]
-            if video_id in statistics:
-                stats = statistics[video_id]
+            if video_id in details:
+                video_details = details[video_id]
                 
-                # Only include videos with enough views
-                if stats["view_count"] >= min_views:
-                    # Add statistics to video metadata
+                # Only include videos with enough views AND sufficient duration
+                if (video_details["view_count"] >= min_views and 
+                    video_details["duration_seconds"] >= min_duration_seconds):
+                    
+                    # Add details to video metadata
                     video.update({
-                        "view_count": stats["view_count"],
-                        "like_count": stats["like_count"],
-                        "comment_count": stats["comment_count"]
+                        "view_count": video_details["view_count"],
+                        "like_count": video_details["like_count"],
+                        "comment_count": video_details["comment_count"],
+                        "duration": video_details["duration"],
+                        "duration_seconds": video_details["duration_seconds"]
                     })
                     filtered_videos.append(video)
         
@@ -234,29 +270,76 @@ class YouTubeSearch:
         return filtered_videos
     
     def search_and_filter(self, query: str, date_filter: str = "24 hours", 
-                         min_views: int = 5000, max_results: int = 5) -> List[Dict[str, Any]]:
+                         min_views: int = 5000, max_results: int = 5,
+                         min_duration_minutes: int = 10,
+                         max_duration_hours: float = 2.5) -> List[Dict[str, Any]]:
         """
-        Search for videos and filter by view count in one operation.
+        Search for videos and filter by view count and duration in one operation.
         
-        This is a convenience method that combines searching and filtering.
+        This method processes videos in order of relevance (as returned by YouTube API)
+        and stops once it has found enough videos that meet the criteria.
         
         Args:
             query (str): Search query for finding videos
             date_filter (str): Time frame filter (e.g., "24 hours", "week", "month")
             min_views (int): Minimum view count for filtering (default: 5000)
             max_results (int): Maximum number of final results to return (default: 5)
+            min_duration_minutes (int): Minimum duration in minutes (default: 10)
+            max_duration_hours (float): Maximum duration in hours (default: 2.5)
             
         Returns:
             List[Dict[str, Any]]: Filtered list of video metadata dictionaries
         """
-        # Search for videos (get more than we need since we'll filter some out)
-        search_results = self.search_videos(query, date_filter, max_results=20)
+        # Get search results sorted by relevance
+        search_results = self.search_videos(query, date_filter, max_results=50, video_duration="any")
         
-        # Filter by view count
-        filtered_videos = self.filter_videos_by_views(search_results, min_views)
+        # Define our duration range in seconds
+        min_seconds = min_duration_minutes * 60
+        max_seconds = max_duration_hours * 3600
         
-        # Limit to requested number of results
-        return filtered_videos[:max_results]
+        # Process videos in batches to minimize API calls
+        filtered_videos = []
+        batch_size = 10  # Process 10 videos at a time
+        
+        for i in range(0, len(search_results), batch_size):
+            # If we already have enough videos, stop processing
+            if len(filtered_videos) >= max_results:
+                break
+                
+            # Get the next batch of videos
+            batch = search_results[i:i+batch_size]
+            video_ids = [video["id"] for video in batch]
+            
+            # Get details for this batch
+            details = self.get_video_details(video_ids)
+            
+            # Filter this batch
+            for video in batch:
+                video_id = video["id"]
+                if video_id in details:
+                    video_details = details[video_id]
+                    duration_seconds = video_details["duration_seconds"]
+                    view_count = video_details["view_count"]
+                    
+                    # Only include videos with enough views AND within the specified duration range
+                    if (view_count >= min_views and 
+                        min_seconds <= duration_seconds <= max_seconds):
+                        
+                        # Add details to video metadata
+                        video.update({
+                            "view_count": view_count,
+                            "like_count": video_details["like_count"],
+                            "comment_count": video_details["comment_count"],
+                            "duration": video_details["duration"],
+                            "duration_seconds": duration_seconds
+                        })
+                        filtered_videos.append(video)
+                        
+                        # If we have enough videos, stop processing
+                        if len(filtered_videos) >= max_results:
+                            break
+        
+        return filtered_videos
 
     def get_video_by_url(self, url: str) -> Optional[Dict[str, Any]]:
         """
@@ -277,7 +360,7 @@ class YouTubeSearch:
             
             # Get video details
             video_response = youtube.videos().list(
-                part="snippet,statistics",
+                part="snippet,statistics,contentDetails",
                 id=video_id
             ).execute()
             
@@ -288,6 +371,11 @@ class YouTubeSearch:
             item = video_response["items"][0]
             snippet = item["snippet"]
             statistics = item["statistics"]
+            content_details = item["contentDetails"]
+            
+            # Parse duration
+            duration_str = content_details["duration"]
+            duration_seconds = self._parse_duration_to_seconds(duration_str)
             
             return {
                 "id": video_id,
@@ -299,7 +387,9 @@ class YouTubeSearch:
                 "thumbnail_url": snippet["thumbnails"]["high"]["url"] if "high" in snippet["thumbnails"] else snippet["thumbnails"]["default"]["url"],
                 "view_count": int(statistics.get("viewCount", 0)),
                 "like_count": int(statistics.get("likeCount", 0)),
-                "comment_count": int(statistics.get("commentCount", 0))
+                "comment_count": int(statistics.get("commentCount", 0)),
+                "duration": duration_str,
+                "duration_seconds": duration_seconds
             }
             
         except HttpError as e:
@@ -307,27 +397,114 @@ class YouTubeSearch:
             return None
 
 
+
 if __name__ == "__main__":
     # Test the YouTube search functionality
     import dotenv
+    import time
     dotenv.load_dotenv()
 
     searcher = YouTubeSearch()
     
     # Test search and filter
     print("\n=== Testing Search and Filter ===")
-    query = "machine learning tutorial"
+    query = "Ai agent tutorials"
     date_filter = "week"
     min_views = 10000
+    min_duration_minutes = 10
+    max_duration_hours = 2.5
     
     print(f"Searching for: '{query}' from {date_filter} with at least {min_views} views")
-    videos = searcher.search_and_filter(query, date_filter, min_views)
+    print(f"Duration range: {min_duration_minutes} minutes to {max_duration_hours} hours")
     
-    print(f"Found {len(videos)} videos:")
+    # Track time to measure performance
+    start_time = time.time()
+    
+    videos = searcher.search_and_filter(
+        query, date_filter, min_views, 
+        min_duration_minutes=min_duration_minutes,
+        max_duration_hours=max_duration_hours
+    )
+    
+    elapsed_time = time.time() - start_time
+    
+    print(f"Found {len(videos)} videos in {elapsed_time:.2f} seconds:")
     for i, video in enumerate(videos, 1):
         print(f"\n{i}. {video['title']}")
         print(f"   Channel: {video['channel_title']}")
         print(f"   Views: {video['view_count']:,}")
+        print(f"   Duration: {video['duration']} ({video['duration_seconds']/60:.1f} minutes)")
+        print(f"   URL: {video['url']}")
+    
+    # Test with different parameters
+    print("\n=== Testing with Different Parameters ===")
+    query = "podcast interview"
+    date_filter = "month"
+    min_views = 50000
+    min_duration_minutes = 30
+    max_duration_hours = 3.0
+    max_results = 3
+    
+    print(f"Searching for: '{query}' from {date_filter} with at least {min_views} views")
+    print(f"Duration range: {min_duration_minutes} minutes to {max_duration_hours} hours")
+    print(f"Max results: {max_results}")
+    
+    start_time = time.time()
+    
+    videos = searcher.search_and_filter(
+        query, date_filter, min_views, max_results,
+        min_duration_minutes=min_duration_minutes,
+        max_duration_hours=max_duration_hours
+    )
+    
+    elapsed_time = time.time() - start_time
+    
+    print(f"Found {len(videos)} videos in {elapsed_time:.2f} seconds:")
+    for i, video in enumerate(videos, 1):
+        print(f"\n{i}. {video['title']}")
+        print(f"   Channel: {video['channel_title']}")
+        print(f"   Views: {video['view_count']:,}")
+        print(f"   Duration: {video['duration']} ({video['duration_seconds']/60:.1f} minutes)")
+        print(f"   URL: {video['url']}")
+    
+    # Test batch processing behavior
+    print("\n=== Testing Batch Processing Behavior ===")
+    
+    # Create a subclass to track batch processing
+    class TrackedYouTubeSearch(YouTubeSearch):
+        def get_video_details(self, video_ids):
+            print(f"  Getting details for batch of {len(video_ids)} videos...")
+            return super().get_video_details(video_ids)
+    
+    tracked_searcher = TrackedYouTubeSearch()
+    
+    query = "ted talks"
+    date_filter = "month"
+    min_views = 100000
+    min_duration_minutes = 15
+    max_duration_hours = 1.0
+    max_results = 2  # Small number to test early stopping
+    
+    print(f"Searching for: '{query}' from {date_filter} with at least {min_views} views")
+    print(f"Duration range: {min_duration_minutes} minutes to {max_duration_hours} hours")
+    print(f"Max results: {max_results} (Testing early stopping)")
+    
+    start_time = time.time()
+    
+    videos = tracked_searcher.search_and_filter(
+        query, date_filter, min_views, max_results,
+        min_duration_minutes=min_duration_minutes,
+        max_duration_hours=max_duration_hours
+    )
+    
+    elapsed_time = time.time() - start_time
+    
+    print(f"Found {len(videos)} videos in {elapsed_time:.2f} seconds:")
+    for i, video in enumerate(videos, 1):
+        print(f"\n{i}. {video['title']}")
+        print(f"   Channel: {video['channel_title']}")
+        print(f"   Views: {video['view_count']:,}")
+        print(f"   Duration: {video['duration']} ({video['duration_seconds']/60:.1f} minutes)")
         print(f"   URL: {video['url']}")
     
     # Test getting video by URL
@@ -339,5 +516,6 @@ if __name__ == "__main__":
         print(f"Video: {video['title']}")
         print(f"Channel: {video['channel_title']}")
         print(f"Views: {video['view_count']:,}")
+        print(f"Duration: {video['duration']} ({video['duration_seconds']/60:.2f} minutes)")
     else:
         print("Video not found")
