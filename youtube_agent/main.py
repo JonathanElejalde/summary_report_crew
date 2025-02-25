@@ -2,82 +2,18 @@ from dotenv import load_dotenv
 import os
 import agentops
 
-from src.video_analysis.crew import VideoAnalysisCrew
-from src.video_analysis.tools.youtube_tools import (
-    extract_video_id,
-    YouTubeComments,
-    YouTubeTranscript
-)
+from youtube_agent.src.tools.youtube_tools import extract_video_id
+from youtube_agent.src.query_parser import parse_user_query
+from youtube_agent.src.youtube_search import YouTubeSearch
+from youtube_agent.src.batch_processor import analyze_video, process_video_batch
+from youtube_agent.src.report_generator import FinalReportGenerator
+from youtube_agent.src.google_drive import GoogleDriveManager
 
-from typing import Tuple, Dict, Any, List
+from typing import Dict, Any
 
-def get_youtube_url() -> str:
-    """Prompt user for YouTube URL and validate it."""
-    while True:
-        url = input("\n🎥 Please enter the YouTube video URL: ").strip()
-        video_id = extract_video_id(url)
-        
-        if video_id:
-            return url
-        print("❌ Invalid YouTube URL. Please enter a valid YouTube video URL.")
-
-def get_analysis_type() -> str:
-    """Prompt user for analysis type preference."""
-    while True:
-        print("\n📊 What type of analysis would you like?")
-        print("1. Detailed Report - A comprehensive analysis of the video")
-        print("2. Concise Summary - Key points and main takeaways")
-        
-        choice = input("\nEnter your choice (1 or 2): ").strip()
-        
-        if choice == "1":
-            return "report"
-        elif choice == "2":
-            return "summary"
-        print("❌ Invalid choice. Please enter 1 for Report or 2 for Summary.")
-
-def collect_video_data(url: str) -> Tuple[str, List[Dict[str, Any]]]:
-    """
-    Collect transcript and comments data for a YouTube video.
-    
-    This function handles both transcript extraction and comment collection.
-    For transcripts, it first attempts to get official captions and falls back
-    to Whisper transcription if needed. For comments, it collects up to the
-    specified maximum number of comments.
-    
-    Args:
-        url (str): The YouTube video URL to analyze
-        
-    Returns:
-        Tuple[str, List[Dict[str, Any]]]: A tuple containing:
-            - str: The video transcript text
-            - List[Dict[str, Any]]: List of comment dictionaries, each containing:
-                - text (str): The comment text
-                - likes (int): Number of likes on the comment
-                
-    Raises:
-        RuntimeError: If transcript extraction fails
-        ValueError: If the URL is invalid
-    """
-    print("\n📥 Collecting video data...")
-    
-    # Get transcript
-    print("Getting video transcript...")
-    transcript_data = YouTubeTranscript().get_transcript(url)
-    if transcript_data["source"] == "error":
-        raise RuntimeError(f"Failed to get transcript: {transcript_data['text']}")
-    transcript = transcript_data["text"]
-    
-    # Get comments
-    print("Getting video comments...")
-    try:
-        comments = YouTubeComments().get_comments(url, max_comments=200)
-        print(f"Retrieved {len(comments)} comments")
-    except Exception as e:
-        print(f"Warning: Failed to get comments: {e}")
-        comments = []
-
-    return transcript, comments
+def get_user_query() -> str:
+    """Prompt user for their search query or video URL."""
+    return input("\n🔍 What YouTube videos would you like to analyze? ").strip()
 
 def main():
     """
@@ -85,16 +21,22 @@ def main():
     
     This function orchestrates the entire analysis process:
     1. Loads environment variables and initializes tracking
-    2. Collects user input (video URL and analysis type)
-    3. Extracts video data (transcript and comments)
-    4. Initializes and runs the AI analysis crew
-    5. Displays and saves the analysis results
+    2. Collects user input (search query or video URL)
+    3. Parses the query to extract search parameters
+    4. If a specific URL is provided, analyzes that video
+    5. Otherwise, searches for videos based on the query parameters
+    6. Analyzes each video and collects the results
+    7. Generates a final consolidated report
+    8. Uploads all reports to Google Drive
+    9. Displays and saves the analysis results
     
     The function handles the complete workflow from user input to final output,
     including error handling and progress display.
         
     Output:
         - Saves analysis results to docs/report/ or docs/summary/
+        - Saves final consolidated report to docs/final/
+        - Uploads all reports to Google Drive
         - Displays analysis results in the console
     """
     # Load environment variables
@@ -106,67 +48,170 @@ def main():
     print("\n🎬 YouTube Video Analysis Tool")
     print("=" * 50)
 
-    # Get user inputs
-    video_url = get_youtube_url()
-    analysis_type = get_analysis_type()
+    # Get user query
+    user_input = get_user_query()
     
-    # Collect video data
-    transcript, comments = collect_video_data(video_url)
+    # Parse the query to extract parameters
+    print("\n🧠 Analyzing your request...")
+    query_params = parse_user_query(user_input)
     
-    print("\n🔍 Starting Analysis...")
-    print("=" * 50)
-    print(f"Video URL: {video_url}")
-    print(f"Analysis Type: {analysis_type.capitalize()}")
-    print(f"Comments collected: {len(comments)}")
+    # Display the extracted parameters
+    print("\n📊 Analysis Parameters:")
+    if query_params.query:
+        print(f"Search Query: {query_params.query}")
+    if query_params.url:
+        print(f"Specific Video URL: {query_params.url}")
+    print(f"Date Filter: {query_params.date_filter}")
+    print(f"Minimum Views: {query_params.views_filter}")
+    print(f"Analysis Type: {query_params.analysis_type.capitalize()}")
     
-    print("\n💬 Original Comments (top 5):")
-    print("-" * 50)
-    for i, comment in enumerate(comments[:5], 1):
-        print(f"{i}. Likes: {comment['likes']}")
-        print(f"   {comment['text']}\n")
-    print("-" * 50)
+    # Initialize YouTube search
+    youtube_search = YouTubeSearch()
     
-    print("\n📝 Transcript:")
-    print("-" * 50)
-    print(transcript[:1000] + "..." if len(transcript) > 1000 else transcript)
-    print("-" * 50)
-    print("=" * 50)
-    
-    # Initialize the crew manager with all data
-    crew_manager = VideoAnalysisCrew(
-        video_url=video_url,
-        analysis_type=analysis_type
-    )
-    
-    # Get the crew instance and kickoff
-    crew = crew_manager.analysis_crew()
-    result = crew.kickoff(
-        inputs={
-            'transcript': transcript,
-            'comments': comments,
-            'user_prompt': f"Analyze the comments and provide a {analysis_type} of the video"
-        }
-    )
-    
-    print("\n✨ Analysis Complete!")
-    print("=" * 50)
-    print("\n🤖 AI Analysis:")
-    print("-" * 50)
-    print(result)
-    print("-" * 50)
-    
-    print("\n💭 Original Comments (top 5):")
-    print("-" * 50)
-    for i, comment in enumerate(comments[:5], 1):
-        print(f"{i}. Likes: {comment['likes']}")
-        print(f"   {comment['text']}\n")
-    print("-" * 50)
-    
-    print("\n📜 Original Transcript:")
-    print("-" * 50)
-    print(transcript[:1000] + "..." if len(transcript) > 1000 else transcript)
-    print("-" * 50)
-    print("=" * 50)
+    # If a specific URL is provided, analyze that video
+    if query_params.url:
+        video_url = query_params.url
+        analysis_type = query_params.analysis_type
+        
+        # Get video metadata
+        video_info = youtube_search.get_video_by_url(video_url)
+        if not video_info:
+            print(f"❌ Could not retrieve information for video: {video_url}")
+            return
+            
+        print(f"\n📺 Video: {video_info['title']}")
+        print(f"👤 Channel: {video_info['channel_title']}")
+        print(f"👁️ Views: {video_info['view_count']:,}")
+        print(f"📊 Analysis Type: {analysis_type.capitalize()}")
+        
+        # Analyze the video
+        try:
+            result = analyze_video(video_url, video_info, analysis_type)
+            
+            print("\n✨ Analysis Complete!")
+            print("=" * 50)
+            print("\n🤖 AI Analysis:")
+            print("-" * 50)
+            print(result["content"])
+            print("-" * 50)
+            print(f"\n📄 Analysis saved to: {result['file_path']}")
+            
+        except Exception as e:
+            print(f"❌ Error analyzing video: {e}")
+        
+    else:
+        # Search for videos based on query parameters
+        if not query_params.query:
+            print("❌ No search query provided. Please specify what to search for.")
+            return
+            
+        print(f"\n🔎 Searching for videos about: {query_params.query}")
+        print(f"⏱️ Time frame: {query_params.date_filter}")
+        print(f"👁️ Minimum views: {query_params.views_filter}")
+        print(f"📊 Analysis Type: {query_params.analysis_type.capitalize()}")
+        
+        videos = youtube_search.search_and_filter(
+            query=query_params.query,
+            date_filter=query_params.date_filter,
+            min_views=query_params.views_filter,
+            max_results=3  # Limit to 3 videos for now
+        )
+        
+        if not videos:
+            print(f"❌ No videos found matching your criteria.")
+            return
+            
+        print(f"\n✅ Found {len(videos)} videos:")
+        for i, video in enumerate(videos, 1):
+            print(f"\n{i}. {video['title']}")
+            print(f"   Channel: {video['channel_title']}")
+            print(f"   Views: {video['view_count']:,}")
+            print(f"   URL: {video['url']}")
+        
+        # Process videos in batch
+        analysis_type = query_params.analysis_type
+        batch_results = process_video_batch(
+            videos=videos,
+            analysis_type=analysis_type,
+            query=query_params.query
+        )
+        
+        # Display successful results
+        successful_results = batch_results.get_successful_results()
+        if successful_results:
+            print("\n🎯 Successful Analyses:")
+            for i, result in enumerate(successful_results, 1):
+                video_info = result["video_info"]
+                print(f"\n{i}. {video_info['title']}")
+                print(f"   File: {result['file_path']}")
+        
+        # Generate consolidated final report
+        print("\n🔄 Generating final consolidated report...")
+        report_generator = FinalReportGenerator()
+        final_report = report_generator.generate_final_report(
+            batch_results=batch_results,
+            query=query_params.query,
+            analysis_type=analysis_type
+        )
+        
+        if final_report["status"] == "success":
+            print("\n✨ Final Report Generated!")
+            print(f"📄 Saved to: {final_report['file_path']}")
+            
+            print("\n📊 Final Analysis:")
+            print("-" * 50)
+            # Print first 500 characters of the report with ellipsis
+            preview = final_report["content"][:500]
+            if len(final_report["content"]) > 500:
+                preview += "...\n[Report truncated for display. See full report in the saved file.]"
+            print(preview)
+            print("-" * 50)
+        else:
+            print(f"\n❌ Error generating final report: {final_report.get('error', 'Unknown error')}")
+        
+        # Upload reports to Google Drive
+        try:
+            print("\n🔄 Uploading reports to Google Drive...")
+            drive_manager = GoogleDriveManager()
+            
+            # Set up folder structure (will use FOLDER_ID from .env if available)
+            print("Setting up folder structure...")
+            folder_ids = drive_manager.setup_folder_structure()
+            
+            # Upload individual analysis files
+            print("Uploading individual analysis files...")
+            uploaded_files = drive_manager.upload_analysis_files(batch_results, folder_ids)
+            
+            # Upload final report
+            print("Uploading final report...")
+            uploaded_final = drive_manager.upload_final_report(final_report, folder_ids)
+            
+            # Collect all uploaded files
+            all_uploaded = []
+            all_uploaded.extend(uploaded_files.get("summaries", []))
+            all_uploaded.extend(uploaded_files.get("reports", []))
+            if uploaded_final:
+                all_uploaded.append(uploaded_final)
+            
+            # Display upload results
+            print("\n📤 Upload Results:")
+            print(f"Summaries: {len(uploaded_files.get('summaries', []))}")
+            print(f"Reports: {len(uploaded_files.get('reports', []))}")
+            print(f"Final Report: {'✅' if uploaded_final else '❌'}")
+            
+            # Generate shareable links
+            print("\n🔗 Shareable Links:")
+            if uploaded_final:
+                print(f"Final Report: {uploaded_final['link']}")
+            
+            # Delete local files after successful upload
+            print("\n🗑️ Cleaning up local files...")
+            deleted_files = drive_manager.delete_local_files(all_uploaded)
+            print(f"Deleted {len(deleted_files)} local files")
+            
+        except Exception as e:
+            print(f"\n❌ Error uploading to Google Drive: {e}")
+            print("Local files have been preserved.")
 
 if __name__ == "__main__":
     main()
