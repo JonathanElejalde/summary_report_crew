@@ -292,19 +292,15 @@ class GoogleDriveManager:
         Returns:
             Dictionary with lists of uploaded files metadata
         """
-        uploaded_summaries = []
-        uploaded_reports = []
+        uploaded = {"summaries": [], "reports": []}
         
-        # Get results from batch
-        results = batch_results.get("results", [])
-        if not results and hasattr(batch_results, "get_successful_results"):
+        # Handle BatchResults object
+        if hasattr(batch_results, 'get_successful_results'):
             results = batch_results.get_successful_results()
-        
-        # Process each result
+        else:  # Handle dictionary format
+            results = batch_results.get("results", [])
+
         for result in results:
-            if result.get("status") != "success":
-                continue
-                
             file_path = result.get("file_path")
             if not file_path or not os.path.exists(file_path):
                 continue
@@ -329,19 +325,16 @@ class GoogleDriveManager:
                 uploaded_file = self.upload_file(file_path, folder_id, custom_name)
                 
                 if file_type == "report":
-                    uploaded_reports.append(uploaded_file)
+                    uploaded["reports"].append(uploaded_file)
                 else:
-                    uploaded_summaries.append(uploaded_file)
+                    uploaded["summaries"].append(uploaded_file)
                     
                 print(f"✅ Uploaded {file_type}: {custom_name}")
                 
             except Exception as e:
                 print(f"❌ Error uploading {file_type} {file_path}: {e}")
         
-        return {
-            "summaries": uploaded_summaries,
-            "reports": uploaded_reports
-        }
+        return uploaded
     
     def upload_final_report(self, final_report: Dict[str, Any], folder_ids: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """
