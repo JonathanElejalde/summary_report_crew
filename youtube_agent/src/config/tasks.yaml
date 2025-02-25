@@ -21,69 +21,99 @@ analyze_comments_task:
 
 create_report_task:
   description: >
-    Create a comprehensive analysis report of the video content based on:
+    Create an in-depth analytical report of the video content based on:
+    - Video URL: {video_url}
+    - Video Title: {video_title}
+    - Video Creator: {video_creator}
+    - Video Duration: {video_duration}
     - Transcript: {transcript}
     - Filtered comments from analyze_comments_task
-
-    # Video Analysis Report
-    ## Content Overview
-    [Provide a comprehensive overview of the video's content and purpose]
-
-    ## Key Themes and Topics
-    [Identify and analyze main themes, topics, and arguments presented]
-
-    ## Main Arguments/Points
-    [Break down the key arguments or points made in the video]
-
-    ## Community Reception and Insights
-    [Analyze the community's response using the filtered comments]
-
-    ## Notable Quotes or Moments
-    [Highlight significant quotes or moments from the transcript]
-
-    Always:
-    - Use proper markdown formatting
-    - Include relevant quotes from transcript when appropriate
-    - Reference community insights from analyzed comments
-    - Maintain professional tone and clear structure
-    - Be comprehensive and detailed in your analysis
+    
+    # Analytical Report Guidelines
+    
+    Your goal is to create a comprehensive analytical report that goes BEYOND summarizing content
+    to provide meaningful insights, critical evaluation, and contextual understanding.
+    
+    ## Required Elements
+    
+    1. **Source Information** - Include complete video metadata at the top
+    
+    2. **Executive Summary** - Brief overview of the video and your key analytical findings
+    
+    3. **Content Analysis** - Detailed breakdown of the content with your analytical insights:
+       - Identify and evaluate main arguments, claims, or narratives
+       - Assess the quality of evidence, reasoning, and presentation
+       - Uncover implicit assumptions, biases, or perspectives
+       - Connect content to broader contexts, trends, or knowledge domains
+    
+    4. **Critical Evaluation** - Your expert assessment of:
+       - Strengths and weaknesses of the content
+       - Validity and significance of key claims
+       - Quality and comprehensiveness of information presented
+       - Potential implications or applications of the content
+    
+    5. **Audience Reception Analysis** - Synthesize community comments with your own analysis:
+       - Identify patterns in audience response
+       - Evaluate areas of consensus or disagreement
+       - Assess how audience reception relates to content quality
+    
+    6. **Conclusions and Implications** - Your final analytical insights about:
+       - The overall significance and value of the content
+       - Broader implications or takeaways
+       - Potential follow-up questions or areas for further exploration
+    
+    ## Format
+    
+    Use professional markdown formatting with clear section headers and logical organization.
+    The report's structure should be adapted to best fit the specific content being analyzed.
+    
+    Remember: This is NOT a summary but an analytical report. Focus on providing insights,
+    evaluation, and context that goes beyond what's explicitly stated in the video.
   expected_output: >
-    A well-formatted markdown file containing the detailed video analysis report.
+    A well-formatted markdown file containing a detailed analytical report with meaningful insights.
   agent: report_analyzer
   dependencies: ["analyze_comments_task"]
 
 create_summary_task:
   description: >
-    Create a focused, concise summary of the video content based on:
+    Create a comprehensive summary of the video content based on:
+    - Video URL: {video_url}
+    - Video Title: {video_title}
+    - Video Creator: {video_creator}
+    - Video Duration: {video_duration}
     - Transcript: {transcript}
     - Filtered comments from analyze_comments_task
-
-    Your goal is to distill the essential information into a clear, actionable summary.
-    Focus on what matters most to someone who wants to quickly understand the video's value.
-
-    Structure your summary as follows:
-
-    # Video Analysis Summary
-    ## Core Message
-    [One or two sentences that capture the main point or purpose of the video]
-
-    ## Key Takeaways
-    - [Most important point with supporting evidence]
-    - [Second most important point with supporting evidence]
-    - [Third most important point with supporting evidence]
-    (Maximum 5 key points, minimum 3)
-
-    ## Community Reception
-    [2-3 sentences synthesizing the overall community response and most valuable insights from comments]
-
-    Always:
-    - Be concise and direct
-    - Use bullet points for key takeaways
-    - Include specific examples or quotes to support main points
-    - Highlight practical implications or actionable insights
-    - Maintain clarity and accessibility for quick understanding
+    
+    # Summary Guidelines
+    
+    Your goal is to create a complete summary that captures ALL valuable information from the video.
+    The summary should be comprehensive yet concise - include every meaningful point without unnecessary details.
+    
+    ## Required Elements
+    
+    1. **Video Metadata** - Include source information at the top (URL, creator, title, duration)
+    
+    2. **Core Message/Purpose** - Clearly identify the main purpose or central message
+    
+    3. **Key Points** - Include ALL meaningful points, ideas, or insights from the video
+       - Do NOT limit yourself to a specific number of points
+       - If the video contains 20 valuable ideas, include all 20
+       - If it contains only 3 valuable ideas, focus on those 3
+       - Use your judgment to determine what's valuable
+    
+    4. **Supporting Evidence** - Include relevant examples, data, or quotes that substantiate key points
+    
+    5. **Community Insights** - Integrate relevant perspectives from the comments
+    
+    ## Format
+    
+    Use clear markdown formatting with appropriate headers, bullet points, and sections.
+    Organize information logically, but adapt the structure to best fit the specific content.
+    
+    Remember: The summary's length should be dictated by the content's richness, not by 
+    arbitrary constraints. Your goal is to preserve ALL valuable information while eliminating redundancy.
   expected_output: >
-    A well-formatted markdown file containing a focused video summary.
+    A well-formatted markdown file containing a comprehensive video summary that captures all valuable content.
   agent: summary_analyzer
   dependencies: ["analyze_comments_task"]
 

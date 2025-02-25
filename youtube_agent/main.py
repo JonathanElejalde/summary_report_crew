@@ -85,20 +85,16 @@ def main():
         print(f"📊 Analysis Type: {analysis_type.capitalize()}")
         
         # Analyze the video
-        try:
-            result = analyze_video(video_url, video_info, analysis_type)
-            
-            print("\n✨ Analysis Complete!")
-            print("=" * 50)
-            print("\n🤖 AI Analysis:")
-            print("-" * 50)
-            print(result["content"])
-            print("-" * 50)
-            print(f"\n📄 Analysis saved to: {result['file_path']}")
-            
-        except Exception as e:
-            print(f"❌ Error analyzing video: {e}")
+        result = analyze_video(video_url, video_info, analysis_type)
         
+        print("\n✨ Analysis Complete!")
+        print("=" * 50)
+        print("\n🤖 AI Analysis:")
+        print("-" * 50)
+        print(result["content"])
+        print("-" * 50)
+        print(f"\n📄 Analysis saved to: {result['file_path']}")
+    
     else:
         # Search for videos based on query parameters
         if not query_params.query:

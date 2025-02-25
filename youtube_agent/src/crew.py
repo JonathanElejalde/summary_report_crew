@@ -114,6 +114,17 @@ class VideoAnalysisCrew:
     def create_summary_task(self) -> Task:
         """Create a focused video summary."""
         task_config = self.tasks_config['create_summary_task'].copy()
+        
+        # Add video metadata to the task context
+        task_config['description'] = task_config['description'].format(
+            video_url=self.video_url,
+            video_title=self.video_metadata.get('title', 'Unknown Title'),
+            video_creator=self.video_metadata.get('creator', 'Unknown Creator'),
+            video_duration=self.video_metadata.get('duration', 'Unknown Duration'),
+            transcript="{transcript}",
+            comments="{comments}",
+        )
+        
         return Task(
             config=task_config,
             agent=self.summary_analyzer(),
@@ -124,6 +135,17 @@ class VideoAnalysisCrew:
     def create_report_task(self) -> Task:
         """Create a detailed video analysis report."""
         task_config = self.tasks_config['create_report_task'].copy()
+        
+        # Add video metadata to the task context
+        task_config['description'] = task_config['description'].format(
+            video_url=self.video_url,
+            video_title=self.video_metadata.get('title', 'Unknown Title'),
+            video_creator=self.video_metadata.get('creator', 'Unknown Creator'),
+            video_duration=self.video_metadata.get('duration', 'Unknown Duration'),
+            transcript="{transcript}",
+            comments="{comments}",
+        )
+        
         return Task(
             config=task_config,
             agent=self.report_analyzer(),

@@ -1,5 +1,5 @@
 langchain-ollama==0.2.2
-pytubefix==8.12.0
+pytubefix==8.12.1
 whisper
 agentops==0.3.26
 google-api-python-client==2.159.0
