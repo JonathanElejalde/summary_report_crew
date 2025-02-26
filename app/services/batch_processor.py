@@ -1,12 +1,11 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
-import os
 from pathlib import Path
 
-from youtube_agent.src.crew import VideoAnalysisCrew
-from youtube_agent.src.tools.youtube_tools import YouTubeComments, YouTubeTranscript
-from youtube_agent.src.youtube_search import YouTubeSearch
+from app.crew.crew import VideoAnalysisCrew
+from app.crew.tools.youtube_tools import YouTubeComments, YouTubeTranscript
+from app.services.youtube_search import YouTubeSearch
 
 class BatchResults:
     """
@@ -131,120 +130,49 @@ def collect_video_data(url: str) -> tuple[str, List[Dict[str, Any]]]:
 
 
 def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str = "report") -> Dict[str, Any]:
-    """
-    Analyze a single YouTube video.
-    
-    Args:
-        video_url: The URL of the YouTube video to analyze
-        video_info: Metadata about the video
-        analysis_type: Type of analysis to perform ("report" or "summary")
+    """Synchronous video analysis"""
+    try:
+        transcript, comments = collect_video_data(video_url)
         
-    Returns:
-        Dictionary containing analysis results and metadata
-    """
-    # Collect video data
-    transcript, comments = collect_video_data(video_url)
-    
-    print(f"\n🔍 Analyzing video: {video_info.get('title', video_url)}")
-    print(f"👤 Channel: {video_info.get('channel_title', 'Unknown')}")
-    print(f"👁️ Views: {video_info.get('view_count', 'Unknown'):,}")
-    print(f"💬 Comments collected: {len(comments)}")
-    print(f"📊 Analysis Type: {analysis_type.capitalize()}")
-    
-    # Initialize the crew manager with all data
-    crew_manager = VideoAnalysisCrew(
-        video_url=video_url,
-        analysis_type=analysis_type,
-        video_metadata=video_info
-    )
-    
-    # Get the crew instance and kickoff
-    crew = crew_manager.analysis_crew()
-    result = crew.kickoff(
-        inputs={
-            'transcript': transcript,
-            'comments': comments,
-            'user_prompt': f"Analyze the comments and provide a {analysis_type} of the video",
-            'video_metadata': video_info
+        crew_manager = VideoAnalysisCrew(
+            video_url=video_url,
+            analysis_type=analysis_type,
+            video_metadata=video_info
+        )
+        
+        result = crew_manager.analysis_crew().kickoff(
+            inputs={
+                'transcript': transcript,
+                'comments': comments,
+                'user_prompt': f"Analyze the comments and provide a {analysis_type} of the video",
+                'video_metadata': video_info
+            }
+        )
+        
+        return {
+            "content": result,
+            "video_info": video_info,
+            "file_path": crew_manager.output_file_path,
+            "analysis_type": analysis_type,
+            "status": "success"
         }
-    )
-    
-    # Return both the result and metadata
-    return {
-        "content": result,
-        "video_info": video_info,
-        "file_path": crew_manager.output_file_path,
-        "analysis_type": analysis_type
-    }
+    except Exception as e:
+        return {
+            "video_url": video_url,
+            "error": str(e),
+            "status": "error"
+        }
 
-
-def process_video_batch(
-    videos: List[Dict[str, Any]], 
-    analysis_type: str = "summary",
-    query: Optional[str] = None
-) -> BatchResults:
-    """
-    Process a batch of YouTube videos.
-    
-    Args:
-        videos: List of video metadata dictionaries
-        analysis_type: Type of analysis to perform ("report" or "summary")
-        query: Optional search query that generated these videos
-        
-    Returns:
-        BatchResults object containing all results and metadata
-    """
-    # Initialize batch results
+def process_video_batch(videos: List[Dict[str, Any]], analysis_type: str = "summary", query: Optional[str] = None) -> BatchResults:
+    """Synchronous batch processing"""
     batch = BatchResults(query=query)
     
-    print(f"\n🔄 Starting batch processing of {len(videos)} videos...")
-    print(f"📊 Analysis type: {analysis_type.capitalize()}")
+    for video in videos:
+        result = analyze_video(video['url'], video, analysis_type)
+        batch.add_result(result)
     
-    # Process each video
-    for i, video in enumerate(videos, 1):
-        video_title = video.get('title', 'Unknown title')
-        video_url = video.get('url')
-        
-        print(f"\n📽️ Processing video {i}/{len(videos)}: {video_title}")
-        
-        try:
-            # Analyze the video
-            result = analyze_video(video_url, video, analysis_type)
-            
-            # Add success metadata
-            result["status"] = "success"
-            batch.add_result(result)
-            
-            print(f"✅ Successfully analyzed video {i}/{len(videos)}")
-            
-        except Exception as e:
-            # Handle errors
-            print(f"❌ Error analyzing video {i}/{len(videos)}: {e}")
-            
-            # Add error metadata
-            batch.add_result({
-                "video_url": video_url,
-                "video_info": video,
-                "error": str(e),
-                "status": "error",
-                "analysis_type": analysis_type
-            })
-    
-    # Mark batch as complete
     batch.complete_batch()
-    
-    # Save batch metadata
-    metadata_file = batch.save_metadata()
-    
-    # Display batch statistics
-    stats = batch.get_statistics()
-    print("\n✨ Batch processing complete!")
-    print(f"📊 Total videos: {stats['total_videos']}")
-    print(f"✅ Successful: {stats['successful']}")
-    print(f"❌ Failed: {stats['failed']}")
-    print(f"⏱️ Duration: {stats['duration_seconds']:.2f} seconds")
-    print(f"📁 Batch metadata saved to: {metadata_file}")
-    
+    batch.save_metadata()
     return batch
 
 
@@ -258,7 +186,7 @@ if __name__ == "__main__":
     3. Displays the results
     """
     from dotenv import load_dotenv
-    from youtube_agent.src.youtube_search import YouTubeSearch
+    from app.services.youtube_search import YouTubeSearch
     
     # Load environment variables
     load_dotenv()

@@ -1,10 +1,9 @@
 from typing import List, Dict, Any, Optional
 import os
 from pathlib import Path
-import time
 from datetime import datetime
 import re
-import json
+from concurrent.futures import ThreadPoolExecutor
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -52,6 +51,7 @@ class GoogleDriveManager:
         
         self.service = self._authenticate()
         self.root_folder_id = None
+        self.executor = ThreadPoolExecutor(max_workers=4)
         
     def _authenticate(self):
         """
@@ -281,95 +281,52 @@ class GoogleDriveManager:
         
         return f"{timestamp}_{safe_channel}_{safe_title}_{file_type}.md"
     
-    def upload_analysis_files(self, batch_results: Dict[str, Any], folder_ids: Dict[str, str]) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Upload all analysis files from a batch.
-        
-        Args:
-            batch_results: BatchResults object or dictionary with results
-            folder_ids: Dictionary with folder IDs
-            
-        Returns:
-            Dictionary with lists of uploaded files metadata
-        """
+    def upload_analysis_files(self, batch, folder_ids):
+        """Synchronous file upload"""
         uploaded = {"summaries": [], "reports": []}
         
-        # Handle BatchResults object
-        if hasattr(batch_results, 'get_successful_results'):
-            results = batch_results.get_successful_results()
-        else:  # Handle dictionary format
-            results = batch_results.get("results", [])
-
-        for result in results:
+        for result in batch.get_successful_results():
             file_path = result.get("file_path")
-            if not file_path or not os.path.exists(file_path):
+            if not file_path:
                 continue
-                
+            
             video_info = result.get("video_info", {})
             analysis_type = result.get("analysis_type", "")
             
-            # Determine folder ID and create custom name
-            if "/report/" in file_path or analysis_type == "report":
-                folder_id = folder_ids["reports"]
-                file_type = "report"
-            elif "/summary/" in file_path or analysis_type == "summary":
-                folder_id = folder_ids["summaries"]
-                file_type = "summary"
-            else:
-                continue
-                
-            custom_name = self.create_custom_filename(video_info, file_type)
+            folder_id = folder_ids["reports" if analysis_type == "report" else "summaries"]
+            custom_name = self.create_custom_filename(video_info, analysis_type)
             
-            # Upload the file
             try:
                 uploaded_file = self.upload_file(file_path, folder_id, custom_name)
                 
-                if file_type == "report":
+                if analysis_type == "report":
                     uploaded["reports"].append(uploaded_file)
                 else:
                     uploaded["summaries"].append(uploaded_file)
                     
-                print(f"✅ Uploaded {file_type}: {custom_name}")
-                
             except Exception as e:
-                print(f"❌ Error uploading {file_type} {file_path}: {e}")
+                print(f"Error uploading file: {e}")
         
         return uploaded
-    
-    def upload_final_report(self, final_report: Dict[str, Any], folder_ids: Dict[str, str]) -> Optional[Dict[str, Any]]:
-        """
-        Upload the final consolidated report.
-        
-        Args:
-            final_report: Dictionary with final report metadata
-            folder_ids: Dictionary with folder IDs
-            
-        Returns:
-            Metadata of the uploaded file or None if upload fails
-        """
+
+    def upload_final_report(self, final_report, folder_ids):
+        """Synchronous final report upload"""
         if final_report.get("status") != "success":
             return None
             
         file_path = final_report.get("file_path")
-        if not file_path or not os.path.exists(file_path):
+        if not file_path:
             return None
             
-        # Create custom name
-        query = final_report.get("query", "Unknown")
-        analysis_type = final_report.get("analysis_type", "report")
-        timestamp = datetime.now().strftime('%Y%m%d')
+        custom_name = self.create_custom_filename(
+            {"title": final_report.get("query", "Report")}, 
+            "final"
+        )
         
-        safe_query = self._sanitize_filename(query)
-        custom_name = f"{timestamp}_Final_{analysis_type}_{safe_query}.md"
-        
-        # Upload the file
         try:
-            uploaded_file = self.upload_file(file_path, folder_ids["final"], custom_name)
-            print(f"✅ Uploaded final {analysis_type}: {custom_name}")
-            return uploaded_file
-            
+            return self.upload_file(file_path, folder_ids["final"], custom_name)
         except Exception as e:
-            print(f"❌ Error uploading final {analysis_type} {file_path}: {e}")
+            print(f"Error uploading final report: {e}")
             return None
     
     def delete_local_files(self, file_metadata_list: List[Dict[str, Any]]) -> List[str]:

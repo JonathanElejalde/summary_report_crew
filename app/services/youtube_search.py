@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import os
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from youtube_agent.src.tools.youtube_tools import extract_video_id
+from app.crew.tools.youtube_tools import extract_video_id
 
 class YouTubeSearch:
     """
