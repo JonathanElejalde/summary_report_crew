@@ -6,3 +6,7 @@ agentops==0.3.26
 google-api-python-client==2.159.0
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.1
+alembic==1.14.0
+psycopg2-binary==2.9.10
+python-dotenv==1.0.1
+

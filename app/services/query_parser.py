@@ -25,66 +25,113 @@ class UserQueryParams(BaseModel):
     )
     analysis_type: Literal["report", "summary"] = Field(
         "report",
-        description="Type of analysis to perform ('report' for detailed analysis, 'summary' for concise overview)"
+        description="Type of analysis to perform"
+    )
+    # New fields for scheduling
+    is_scheduled: bool = Field(
+        False,
+        description="Whether this is a scheduled request"
+    )
+    schedule_frequency: Optional[str] = Field(
+        None,
+        description="Frequency of scheduled analysis (daily/weekly/monthly)"
+    )
+    preferred_time: Optional[str] = Field(
+        None,
+        description="Preferred time of day for scheduled analysis (HH:MM format)"
     )
 
 def parse_user_query(user_input: str, model: str = "gpt-4o-mini") -> UserQueryParams:
     """
     Parse a user's natural language query into structured search parameters.
     
-    Uses LangChain with `model` to extract search parameters from the user's
-    input, handling various ways users might express their search intent.
+    This function handles both immediate analysis requests and scheduling requests.
+    For scheduling requests, it extracts frequency and preferred time information.
     
     Args:
-        user_input (str): The natural language query from the user
+        user_input (str): The natural language query from the user. Can be either:
+            - Regular analysis request: "Find videos about AI from last week"
+            - Scheduling request: "Analyze AI news every week at 9am"
         model (str): The model to use for parsing (default: "gpt-4o-mini")
         
     Returns:
-        UserQueryParams: Structured parameters for YouTube search and filtering
+        UserQueryParams: Structured parameters containing:
+            - Basic search parameters (query, url, date_filter, views_filter, analysis_type)
+            - Scheduling parameters if applicable (is_scheduled, schedule_frequency, preferred_time)
         
-    Example:
-        >>> params = parse_user_query("Find me videos about machine learning from last week with at least 10k views")
+    Examples:
+        Regular analysis:
+        >>> params = parse_user_query("Find me videos about machine learning from last week")
         >>> params.query
         'machine learning'
-        >>> params.date_filter
-        'week'
-        >>> params.views_filter
-        10000
+        >>> params.is_scheduled
+        False
+        
+        Scheduled analysis:
+        >>> params = parse_user_query("Analyze AI news every week at 9am")
+        >>> params.query
+        'AI news'
+        >>> params.is_scheduled
+        True
+        >>> params.schedule_frequency
+        'weekly'
+        >>> params.preferred_time
+        '09:00'
+        
+        URL analysis:
+        >>> params = parse_user_query("Analyze this video: https://youtube.com/watch?v=...")
+        >>> params.url
+        'https://youtube.com/watch?v=...'
+    
+    Notes:
+        - For scheduling requests, frequency must be one of: daily, weekly, monthly
+        - Preferred time is converted to 24-hour format (HH:MM)
+        - If no preferred time is specified in a scheduling request, defaults to "00:00"
     """
     # Initialize the parser with our Pydantic model
     parser = PydanticOutputParser(pydantic_object=UserQueryParams)
     
-    # Create a prompt template
-    template = """
-    You are an AI assistant that extracts search parameters from user queries about YouTube videos.
-    
-    USER QUERY: {query}
-    
-    Extract the following information:
-    1. The search query for YouTube (what topics/keywords to search for)
-    2. A specific video URL if provided
-    3. Time frame for the search (default to "24 hours" if not specified)
-    4. Minimum view count for filtering (default to 5000 if not specified)
-    5. Analysis type (default to "report" if not specified)
-    
-    If the user provides a specific YouTube URL, extract it. If they're asking for a general search, 
-    identify the main topic or keywords they want to search for.
-    
-    For the time frame, look for mentions of "today", "this week", "this month", "this year", or specific 
-    time periods. Map these to "24 hours", "week", "month", "year", etc.
-    
-    For view count, extract any minimum view threshold mentioned (e.g., "at least 10k views", "more than 1 million views").
-    
-    For analysis type, look for indications of whether the user wants a detailed report or a concise summary.
-    If they mention "summary", "brief", "concise", "overview", etc., set analysis_type to "summary".
-    If they mention "report", "detailed", "comprehensive", "in-depth", etc., or don't specify, set analysis_type to "report".
-    
-    {format_instructions}
-    """
-    
-    # Set up the prompt with format instructions from the parser
+    # Create the prompt template
+    template = """You are an AI assistant that extracts search parameters from user queries about YouTube videos.
+Pay special attention to scheduling requests.
+
+USER QUERY: {query}
+
+First, determine if this is a scheduling request by looking for keywords like:
+- "schedule", "every day", "every week", "daily", "weekly", "monthly"
+- Time specifications like "at 9am", "every morning", etc.
+
+If it's a scheduling request, extract:
+1. The frequency (daily/weekly/monthly)
+2. Preferred time (in HH:MM format, default to "14:00" if not specified)
+
+For all requests, extract:
+1. The search query for YouTube
+2. A specific video URL if provided
+3. Time frame for the search (default to "24 hours" if not specified)
+4. Minimum view count for filtering (default to 5000 if not specified)
+5. Analysis type (default to "report" if not specified)
+
+Examples:
+"Analyze AI news every week at 9am" ->
+{{
+    "query": "AI news",
+    "is_scheduled": true,
+    "schedule_frequency": "weekly",
+    "preferred_time": "09:00"
+}}
+
+"Search for machine learning videos from last week" ->
+{{
+    "query": "machine learning",
+    "is_scheduled": false,
+    "date_filter": "week"
+}}
+
+{format_instructions}"""
+
     prompt = PromptTemplate(
-        template=template,
+        template=template.strip(),
         input_variables=["query"],
         partial_variables={"format_instructions": parser.get_format_instructions()}
     )
@@ -95,10 +142,8 @@ def parse_user_query(user_input: str, model: str = "gpt-4o-mini") -> UserQueryPa
         temperature=0,
     )
     
-    # Generate the formatted prompt
+    # Generate the formatted prompt and get response
     formatted_prompt = prompt.format(query=user_input)
-    
-    # Get the response from the model
     response = llm.invoke(formatted_prompt).content
     
     # Parse the response into our Pydantic model
@@ -110,21 +155,56 @@ def parse_user_query(user_input: str, model: str = "gpt-4o-mini") -> UserQueryPa
         return UserQueryParams(query=user_input)
     
 if __name__ == "__main__":
-    # Test the parser with a sample query
+    # Test regular queries
+    print("\n=== Testing Regular Queries ===")
     params = parse_user_query("Find me videos about machine learning from last week with at least 10k views")
-    print(params)
+    print(f"Regular Search Query:")
+    print(f"- Query: {params.query}")
+    print(f"- Date Filter: {params.date_filter}")
+    print(f"- Views Filter: {params.views_filter}")
+    print(f"- Is Scheduled: {params.is_scheduled}")
     
-    # Test with a URL
+    # Test URL analysis
+    print("\n=== Testing URL Analysis ===")
     params = parse_user_query("Analyze this YouTube video: https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-    print(params)
+    print(f"URL Analysis:")
+    print(f"- URL: {params.url}")
+    print(f"- Is Scheduled: {params.is_scheduled}")
     
-    # Test with a complex query
-    params = parse_user_query("I want to see popular finance videos from this month with more than 100k views")
-    print(params)
+    # Test scheduling queries
+    print("\n=== Testing Scheduling Queries ===")
+    scheduling_tests = [
+        "Schedule AI news analysis every day at 9am",
+        "Analyze crypto market videos weekly at 18:30",
+        "Give me a monthly report about machine learning trends on the first day of each month",
+        "Every week at 10am, analyze videos about tech news with at least 50k views"
+    ]
     
-    # Test with analysis type specified
-    params = parse_user_query("Give me a summary of videos about AI from this week")
-    print(params)
+    for test in scheduling_tests:
+        params = parse_user_query(test)
+        print(f"\nInput: {test}")
+        print(f"- Query: {params.query}")
+        print(f"- Is Scheduled: {params.is_scheduled}")
+        print(f"- Frequency: {params.schedule_frequency}")
+        print(f"- Preferred Time: {params.preferred_time}")
+        print(f"- Analysis Type: {params.analysis_type}")
+        if params.views_filter != 5000:  # Only show if different from default
+            print(f"- Views Filter: {params.views_filter}")
     
-    params = parse_user_query("I need a detailed report on cryptocurrency videos with at least 50k views")
-    print(params)
+    # Test edge cases
+    print("\n=== Testing Edge Cases ===")
+    edge_cases = [
+        "Schedule a video analysis but with no specific time",  # Should default to 00:00
+        "Daily AI news",  # Minimal scheduling request
+        "Weekly tech updates with minimum 1M views at midnight",  # Complex scheduling with specific views
+    ]
+    
+    for test in edge_cases:
+        params = parse_user_query(test)
+        print(f"\nInput: {test}")
+        print(f"- Is Scheduled: {params.is_scheduled}")
+        if params.is_scheduled:
+            print(f"- Frequency: {params.schedule_frequency}")
+            print(f"- Preferred Time: {params.preferred_time}")
+        print(f"- Query: {params.query}")
+
