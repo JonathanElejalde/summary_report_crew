@@ -78,6 +78,15 @@ def handle_analysis_request(user_input: str) -> Dict[str, Any]:
         return _process_single_video(query_params, youtube_search)
     return _process_search_query(query_params, youtube_search, drive_manager)
 
+def handle_scheduled_analysis(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle analysis for scheduled jobs using stored parameters"""
+    youtube_search = YouTubeSearch()
+    drive_manager = GoogleDriveManager()
+
+    if query_params.get('url'):
+        return _process_single_video(query_params, youtube_search)
+    return _process_search_query(query_params, youtube_search, drive_manager)
+
 
 
 

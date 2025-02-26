@@ -2,10 +2,7 @@ from fastapi import FastAPI
 from dotenv import load_dotenv
 import agentops
 import os
-from contextlib import asynccontextmanager
-
 from app.api.routes import router as analysis_router
-from app.services.scheduler import SchedulerService
 
 # Load environment variables first
 load_dotenv()
@@ -13,20 +10,12 @@ load_dotenv()
 # Initialize tracking
 agentops.init(api_key=os.getenv("AGENTOPS_API_KEY"))
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialize scheduler on startup"""
-    scheduler = SchedulerService()
-    scheduler.initialize()
-    yield
-
-# Create FastAPI app with lifespan
+# Create FastAPI app
 app = FastAPI(
     title="YouTube Analysis API",
     description="API for analyzing YouTube videos and generating reports",
     version="0.1.0",
-    docs_url="/docs",
-    lifespan=lifespan
+    docs_url="/docs"
 )
 
 # Include routers
