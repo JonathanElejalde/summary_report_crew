@@ -80,13 +80,17 @@ def _format_drive_links(drive_links: Dict[str, list]) -> list:
     
     for summary in drive_links.get('summaries', []):
         if isinstance(summary, dict):
-            formatted.append(f"📄 Summary: {summary.get('link', 'N/A')}")
+            # Add Google Docs indicator if applicable
+            doc_type = "Google Doc" if summary.get('is_gdoc', False) else "Summary"
+            formatted.append(f"📄 {doc_type}: {summary.get('link', 'N/A')}")
         elif isinstance(summary, str):
             formatted.append(f"📄 Summary: {summary}")
     
     for report in drive_links.get('reports', []):
         if isinstance(report, dict):
-            formatted.append(f"📊 Report: {report.get('link', 'N/A')}")
+            # Add Google Docs indicator if applicable
+            doc_type = "Google Doc" if report.get('is_gdoc', False) else "Report"
+            formatted.append(f"📊 {doc_type}: {report.get('link', 'N/A')}")
         elif isinstance(report, str):
             formatted.append(f"📊 Report: {report}")
             

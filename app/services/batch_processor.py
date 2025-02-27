@@ -212,7 +212,8 @@ def upload_analysis_files(video_info: Dict[str, Any], crew_manager: VideoAnalysi
             if upload_result and 'id' in upload_result:
                 drive_links[file_type].append({
                     "title": video_info.get("title", "Analysis"),
-                    "link": f"https://drive.google.com/file/d/{upload_result['id']}/view"
+                    "link": f"https://drive.google.com/file/d/{upload_result['id']}/view",
+                    "is_gdoc": upload_result.get('is_gdoc', False)
                 })
                 successful_uploads.append(file_path)
                 print(f"Added to successful uploads: {file_path}")
@@ -264,7 +265,8 @@ def upload_final_report(final_report: Dict[str, Any]) -> Dict[str, Any]:
             
             return {
                 "title": final_report.get("query", "Final Analysis"),
-                "link": f"https://drive.google.com/file/d/{upload_result['id']}/view"
+                "link": f"https://drive.google.com/file/d/{upload_result['id']}/view",
+                "is_gdoc": upload_result.get('is_gdoc', False)
             }
         
     except Exception as e:

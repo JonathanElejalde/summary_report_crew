@@ -36,8 +36,8 @@ def _process_search_query(params, youtube_search: YouTubeSearch, drive_manager: 
         query=params.query,
         date_filter=params.date_filter,
         min_views=params.views_filter,
-        #max_results=1,
-        max_results=3
+        max_results=1,
+        #max_results=3
     )
     
     if not videos:

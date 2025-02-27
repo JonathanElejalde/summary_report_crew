@@ -193,6 +193,9 @@ class GoogleDriveManager:
         """
         Upload a file to Google Drive and make it accessible via link.
         
+        If UPLOAD_GOOGLE_DOCS environment variable is set to 'true', 
+        markdown files will be automatically converted to Google Docs format.
+        
         Args:
             file_path: Path to the file to upload
             folder_id: ID of the folder to upload to
@@ -203,17 +206,44 @@ class GoogleDriveManager:
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
-            
+        
         file_name = custom_name or os.path.basename(file_path)
+        
+        # Check if we should convert markdown to Google Docs
+        convert_to_gdoc = False
+        if os.getenv("UPLOAD_GOOGLE_DOCS", "false").lower() == "true":
+            # Only convert markdown files
+            file_ext = os.path.splitext(file_path)[1].lower()
+            if file_ext in ['.md', '.markdown']:
+                convert_to_gdoc = True
+                print(f"Converting {file_path} to Google Docs format")
         
         file_metadata = {
             'name': file_name,
             'parents': [folder_id]
         }
         
+        # Determine the MIME type based on file extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        if file_ext == '.md':
+            mime_type = 'text/markdown'
+        elif file_ext == '.txt':
+            mime_type = 'text/plain'
+        elif file_ext == '.html':
+            mime_type = 'text/html'
+        elif file_ext in ['.docx', '.doc']:
+            mime_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        else:
+            mime_type = 'application/octet-stream'
+        
+        # If converting to Google Docs, set the appropriate parameters
+        if convert_to_gdoc:
+            file_metadata['mimeType'] = 'application/vnd.google-apps.document'
+        
         media = MediaFileUpload(
             file_path,
-            mimetype='text/markdown',
+            mimetype=mime_type,
             resumable=True
         )
         
@@ -221,7 +251,7 @@ class GoogleDriveManager:
             file = self.service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, name, webViewLink'
+                fields='id, name, webViewLink, mimeType',
             ).execute()
             
             # Set file permissions to "Anyone with the link can view"
@@ -237,12 +267,37 @@ class GoogleDriveManager:
                 'id': file.get('id'),
                 'name': file.get('name'),
                 'link': file.get('webViewLink'),
-                'local_path': file_path
+                'mimeType': file.get('mimeType'),
+                'local_path': file_path,
+                'is_gdoc': convert_to_gdoc
             }
             
         except HttpError as error:
             print(f"Error uploading file: {error}")
             raise
+    
+    def upload_markdown_as_gdoc(self, file_path: str, folder_id: str, custom_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Upload a markdown file and convert it to Google Docs format.
+        
+        Args:
+            file_path: Path to the markdown file
+            folder_id: ID of the folder to upload to
+            custom_name: Optional custom name for the file
+            
+        Returns:
+            Dictionary with file metadata including ID and webViewLink
+        """
+        # Ensure the file is a markdown file
+        if not file_path.lower().endswith(('.md', '.markdown')):
+            raise ValueError(f"File must be a markdown file: {file_path}")
+        
+        # If custom name doesn't have an extension, add .md
+        if custom_name and not custom_name.lower().endswith(('.md', '.markdown')):
+            custom_name = f"{custom_name}.md"
+        
+        # Upload the file with conversion to Google Docs
+        return self.upload_file(file_path, folder_id, custom_name, convert_to_gdoc=True)
     
     def _sanitize_filename(self, filename: str) -> str:
         """
@@ -381,6 +436,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Test Google Drive integration')
     parser.add_argument('--delete', action='store_true', help='Delete local files after upload')
     parser.add_argument('--test-file', type=str, help='Path to a specific test file to upload')
+    parser.add_argument('--convert-to-gdoc', action='store_true', 
+                        help='Convert markdown to Google Docs format')
     args = parser.parse_args()
     
     print("\n🧪 Testing Google Drive integration")
@@ -445,6 +502,29 @@ if __name__ == "__main__":
         print(f"File name: {uploaded_file['name']}")
         print(f"Shareable link: {uploaded_file['link']}")
         
+        # Test markdown to Google Docs conversion if requested
+        if args.convert_to_gdoc:
+            print("\n🔄 Testing Markdown to Google Docs conversion...")
+            
+            # Use the test file path from earlier
+            print(f"Converting file: {test_file_path}")
+            
+            # Create a custom name for the Google Doc
+            gdoc_custom_name = drive_manager.create_custom_filename(mock_video_info, "gdoc_test")
+            
+            # Upload and convert to Google Docs
+            gdoc_file = drive_manager.upload_markdown_as_gdoc(
+                test_file_path, 
+                folder_ids["final"],  # Using final reports folder
+                gdoc_custom_name
+            )
+            
+            print("\n✅ Google Docs conversion successful!")
+            print(f"File ID: {gdoc_file['id']}")
+            print(f"File name: {gdoc_file['name']}")
+            print(f"MIME Type: {gdoc_file['mimeType']}")
+            print(f"Shareable link: {gdoc_file['link']}")
+        
         # Delete local file if requested
         if args.delete and not args.test_file:  # Only delete if we created the file
             print("\n🗑️ Deleting local test file...")
@@ -457,75 +537,4 @@ if __name__ == "__main__":
         print(f"\n❌ Error during Google Drive test: {e}")
         import traceback
         traceback.print_exc()
-
-    # Additional test for batch upload if a directory is provided
-    if os.path.exists("docs/summary") and os.path.exists("docs/report"):
-        try:
-            print("\n🧪 Testing batch upload functionality")
-            
-            # Create mock batch results
-            mock_batch = {
-                "results": []
-            }
-            
-            # Find summary files
-            summary_files = list(Path("docs/summary").glob("*.md"))
-            for file_path in summary_files[:2]:  # Limit to 2 files for testing
-                mock_batch["results"].append({
-                    "status": "success",
-                    "file_path": str(file_path),
-                    "video_info": {
-                        "title": file_path.stem,
-                        "channel_title": "Test Channel"
-                    },
-                    "analysis_type": "summary"
-                })
-            
-            # Find report files
-            report_files = list(Path("docs/report").glob("*.md"))
-            for file_path in report_files[:2]:  # Limit to 2 files for testing
-                mock_batch["results"].append({
-                    "status": "success",
-                    "file_path": str(file_path),
-                    "video_info": {
-                        "title": file_path.stem,
-                        "channel_title": "Test Channel"
-                    },
-                    "analysis_type": "report"
-                })
-            
-            if not mock_batch["results"]:
-                print("No summary or report files found for batch upload test")
-            else:
-                print(f"Found {len(mock_batch['results'])} files for batch upload test")
-                
-                # Upload batch files
-                uploaded = drive_manager.upload_analysis_files(mock_batch, folder_ids)
-                
-                print("\n📤 Batch Upload Results:")
-                print(f"Summaries: {len(uploaded.get('summaries', []))}")
-                print(f"Reports: {len(uploaded.get('reports', []))}")
-                
-                # Display links
-                print("\n🔗 Shareable Links:")
-                for summary in uploaded.get('summaries', []):
-                    print(f"Summary: {summary['name']} - {summary['link']}")
-                for report in uploaded.get('reports', []):
-                    print(f"Report: {report['name']} - {report['link']}")
-                
-                # Delete local files if requested
-                if args.delete:
-                    all_uploaded = []
-                    all_uploaded.extend(uploaded.get('summaries', []))
-                    all_uploaded.extend(uploaded.get('reports', []))
-                    
-                    print("\n🗑️ Deleting local files...")
-                    deleted = drive_manager.delete_local_files(all_uploaded)
-                    print(f"Deleted {len(deleted)} local files")
-            
-            print("\n✅ Batch upload test complete!")
-            
-        except Exception as e:
-            print(f"\n❌ Error during batch upload test: {e}")
-            import traceback
-            traceback.print_exc()
+   
