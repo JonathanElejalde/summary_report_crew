@@ -29,6 +29,9 @@ def format_response(result: Dict[str, Any]) -> str:
 
     response = []
     
+    # Debug log to see what's in the result
+    print(f"Formatting response with result: {result}")
+    
     # Single video analysis
     if result.get('type') == 'single':
         metadata = result.get('metadata', {})
@@ -45,7 +48,16 @@ def format_response(result: Dict[str, Any]) -> str:
         response.append("*Batch Analysis Results*")
         
         if 'drive_links' in result:
+            print(f"Drive links found: {result['drive_links']}")
+            # Check specifically for final_report
+            if 'final_report' in result['drive_links'] and result['drive_links']['final_report']:
+                print(f"Final report found: {result['drive_links']['final_report']}")
+            else:
+                print("No final_report found in drive_links")
+            
             response.extend(_format_batch_links(result['drive_links']))
+        else:
+            print("No drive_links found in result")
         
         if 'statistics' in result:
             response.extend(_format_statistics(result['statistics']))
@@ -80,14 +92,26 @@ def _format_drive_links(drive_links: Dict[str, list]) -> list:
             
     return formatted
 
-def _format_batch_links(drive_links: Dict[str, list]) -> list:
+def _format_batch_links(drive_links: Dict[str, Any]) -> list:
     """Format drive links for batch analysis"""
     formatted = []
+    
+    # Handle final report FIRST - make it the most prominent
+    final_report = drive_links.get('final_report')
+    if final_report:
+        formatted.append("\n🌟 *FINAL ANALYSIS:*")
+        if isinstance(final_report, dict):
+            formatted.append(f"👉 {final_report.get('link', 'N/A')}")
+        elif isinstance(final_report, str):
+            formatted.append(f"👉 {final_report}")
+        
+        # Add a separator
+        formatted.append("\n-------------------")
     
     # Handle summaries
     summaries = drive_links.get('summaries', [])
     if summaries:
-        formatted.append("\n📄 *Summaries:*")
+        formatted.append("\n📄 *Individual Summaries:*")
         for summary in summaries:
             if isinstance(summary, dict):
                 formatted.append(f"- {summary.get('title', 'Analysis')}: {summary.get('link', 'N/A')}")
@@ -97,21 +121,12 @@ def _format_batch_links(drive_links: Dict[str, list]) -> list:
     # Handle reports
     reports = drive_links.get('reports', [])
     if reports:
-        formatted.append("\n📊 *Reports:*")
+        formatted.append("\n📊 *Individual Reports:*")
         for report in reports:
             if isinstance(report, dict):
                 formatted.append(f"- {report.get('title', 'Analysis')}: {report.get('link', 'N/A')}")
             elif isinstance(report, str):
                 formatted.append(f"- {report}")
-    
-    # Handle final report - make it more prominent
-    final_report = drive_links.get('final_report')
-    if final_report:
-        formatted.append("\n🌟 *Final Analysis:*")
-        if isinstance(final_report, dict):
-            formatted.append(f"{final_report.get('link', 'N/A')}")
-        elif isinstance(final_report, str):
-            formatted.append(f"{final_report}")
     
     return formatted
 

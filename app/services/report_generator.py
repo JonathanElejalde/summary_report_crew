@@ -126,28 +126,40 @@ class FinalReportGenerator:
             if result.get("status") != "success":
                 continue
                 
-            file_path = result.get("file_path")
-            if not file_path or not os.path.exists(file_path):
-                print(f"File not found or invalid path: {file_path}")
+            # Get file paths from the file_paths list
+            file_paths = result.get("file_paths", [])
+            if not file_paths:
+                print(f"No file paths found in result: {result.get('metadata', {}).get('title', 'Unknown')}")
                 continue
+            
+            # Get video info
+            video_info = result.get("video_info", {})
+            video_title = video_info.get("title") or result.get("metadata", {}).get("title", "Unknown")
+            video_url = video_info.get("url") or result.get("video_url", "")
+            
+            # Process each file path
+            for file_path in file_paths:
+                if not file_path or not os.path.exists(file_path):
+                    print(f"File not found or invalid path: {file_path}")
+                    continue
                 
-            print(f"Reading file: {file_path}")
-            content = self._read_file_content(file_path)
-            
-            file_info = {
-                "video_title": result.get("video_info", {}).get("title", "Unknown"),
-                "video_url": result.get("video_info", {}).get("url", ""),
-                "file_path": file_path,
-                "content": content
-            }
-            
-            # Categorize as report or summary
-            if "/report/" in file_path:
-                reports.append(file_info)
-                print(f"Added as report: {file_path}")
-            elif "/summary/" in file_path:
-                summaries.append(file_info)
-                print(f"Added as summary: {file_path}")
+                print(f"Reading file: {file_path}")
+                content = self._read_file_content(file_path)
+                
+                file_info = {
+                    "video_title": video_title,
+                    "video_url": video_url,
+                    "file_path": file_path,
+                    "content": content
+                }
+                
+                # Categorize as report or summary
+                if "/report/" in file_path:
+                    reports.append(file_info)
+                    print(f"Added as report: {file_path}")
+                elif "/summary/" in file_path:
+                    summaries.append(file_info)
+                    print(f"Added as summary: {file_path}")
         
         print(f"Collected {len(reports)} reports and {len(summaries)} summaries")
         

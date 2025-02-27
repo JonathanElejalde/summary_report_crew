@@ -31,11 +31,12 @@ def _process_single_video(params, youtube_search: YouTubeSearch):
     }
     
 
-def _process_search_query(params, youtube_search, drive_manager):
+def _process_search_query(params, youtube_search: YouTubeSearch, drive_manager: GoogleDriveManager):
     videos = youtube_search.search_and_filter(
         query=params.query,
         date_filter=params.date_filter,
         min_views=params.views_filter,
+        #max_results=1,
         max_results=3
     )
     
@@ -44,10 +45,21 @@ def _process_search_query(params, youtube_search, drive_manager):
 
     batch = process_video_batch(videos, params.analysis_type, params.query)
     
+    # Get drive links
+    drive_links = batch.get_drive_links()
+    
+    # Debug log
+    print(f"Drive links before returning from _process_search_query: {drive_links}")
+    
+    # Check if final_report is missing but we have it in the batch object
+    if (not drive_links.get('final_report') or drive_links['final_report'] is None) and hasattr(batch, 'final_report_link'):
+        drive_links['final_report'] = batch.final_report_link
+        print(f"Restored final report link: {batch.final_report_link}")
+    
     return {
         "status": "success",
         "type": "batch",
-        "drive_links": batch.get_drive_links(),  # We need to add this method to BatchResults
+        "drive_links": drive_links,
         "statistics": batch.get_statistics()
     }
 

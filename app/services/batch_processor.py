@@ -95,18 +95,27 @@ class BatchResults:
         
         return str(metadata_file)
 
-    def get_drive_links(self) -> Dict[str, list]:
+    def get_drive_links(self) -> Dict[str, Any]:
         """Collect all drive links from successful results"""
         all_links = {
             "summaries": [],
             "reports": [],
-            "final_report": []
+            "final_report": None  # Initialize as None, not an empty list
         }
         
+        # First, collect links from individual results
         for result in self.get_successful_results():
             if "drive_links" in result:
                 for link_type in ["summaries", "reports"]:
                     all_links[link_type].extend(result["drive_links"].get(link_type, []))
+                
+                # If this result has a final_report, use it
+                if "final_report" in result["drive_links"] and result["drive_links"]["final_report"]:
+                    all_links["final_report"] = result["drive_links"]["final_report"]
+        
+        # Check if we have a final_report attribute directly on the batch
+        if hasattr(self, 'final_report_link') and self.final_report_link:
+            all_links["final_report"] = self.final_report_link
         
         return all_links
 
@@ -296,6 +305,12 @@ def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str
             "type": "single",
             "drive_links": drive_links,
             "file_paths": file_paths,  # Store for later cleanup
+            "video_info": {  # Add this to match what FinalReportGenerator expects
+                "title": video_info.get("title"),
+                "url": video_url,
+                "channel_title": video_info.get("channel_title"),
+                "view_count": video_info.get("view_count")
+            },
             "metadata": {
                 "title": video_info.get("title"),
                 "channel": video_info.get("channel_title"),
@@ -328,7 +343,13 @@ def process_video_batch(videos: List[Dict[str, Any]], analysis_type: str = "summ
     if len(batch.get_successful_results()) > 0:
         print("\n📊 Generating final report...")
         report_generator = FinalReportGenerator()
-        final_report = report_generator.generate_final_report(batch, query, analysis_type)
+        
+        # Just pass the batch object - the FinalReportGenerator will extract file paths
+        final_report = report_generator.generate_final_report(
+            batch_results=batch,
+            query=query, 
+            analysis_type=analysis_type
+        )
         
         # Upload final report
         if final_report.get("status") == "success":
@@ -337,6 +358,10 @@ def process_video_batch(videos: List[Dict[str, Any]], analysis_type: str = "summ
                 # Add final report link to batch results
                 drive_links = batch.get_drive_links()
                 drive_links["final_report"] = final_report_link
+                # Store the final report link directly on the batch object
+                batch.final_report_link = final_report_link
+                print(f"\n✅ Added final report link to batch results: {final_report_link}")
+                print(f"Updated drive_links: {drive_links}")
     
     # Now that the final report is generated, clean up the individual analysis files
     print("\n🧹 Cleaning up individual analysis files...")
