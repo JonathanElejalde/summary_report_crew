@@ -139,7 +139,7 @@ class YouTubeTranscript:
     
     def __init__(self, model_size: str = "medium", device: Optional[str] = None):
         """
-        Initialize with Whisper model configuration.
+        Initialize with Whisper model configuration data.
         
         Args:
             model_size (str): Whisper model size (tiny, base, small, medium, large).
@@ -147,9 +147,10 @@ class YouTubeTranscript:
             device (Optional[str]): Device to use for Whisper model (cuda/cpu).
                                   If None, will use CUDA if available.
         """
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = whisper.load_model(model_size, device=device)
+        # Whisper data
+        self.model_size = model_size
+        self.device = device
+        
 
     def _parse_srt_captions(self, srt_content: str) -> Optional[str]:
         """
@@ -270,7 +271,12 @@ class YouTubeTranscript:
             audio_stream.download(output_path=temp_dir, filename="audio.mp4")
             
             print("Transcribing with Whisper...")
-            result = self.model.transcribe(
+            # Only initialize the model when needed. Most of the times we won't need it.
+            if self.device is None:
+                self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = whisper.load_model(self.model_size, device=self.device)
+
+            result = model.transcribe(
                 audio_path,
                 fp16=torch.cuda.is_available(),
                 language='en',
@@ -392,7 +398,12 @@ class YouTubeTranscript:
         if audio_path:
             try:
                 print("Transcribing yt-dlp audio with Whisper...")
-                result = self.model.transcribe(
+                # Only initialize the model when needed. Most of the times we won't need it.
+                if self.device is None:
+                    self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                model = whisper.load_model(self.model_size, device=self.device)
+
+                result = model.transcribe(
                     audio_path,
                     fp16=torch.cuda.is_available(),
                     language='en',

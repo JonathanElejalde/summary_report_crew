@@ -3,6 +3,7 @@ from datetime import datetime
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai.project import CrewBase, agent, crew, task
 from pathlib import Path
+from typing import Optional
 PROJECT_ROOT = os.getenv("PROJECT_ROOT")
 
 from pydantic import BaseModel
@@ -38,8 +39,11 @@ class VideoAnalysisCrew:
         self.video_url = video_url
         self.analysis_type = analysis_type
         self.video_metadata = video_metadata or {}
-        self.output_file_path = None
         
+        # Track generated files
+        self.report_path: Optional[str] = None
+        self.summary_path: Optional[str] = None
+
     @agent
     def manager(self) -> Agent:
         
@@ -84,31 +88,35 @@ class VideoAnalysisCrew:
         )
 
     def _generate_output_file(self, output_type: str) -> str:
-        """
-        Generate output file path for analysis results.
-        
-        Args:
-            output_type: Type of output (report/summary)
-            
-        Returns:
-            String path to the output file
-        """
-        # Create a safe filename that includes video title if available
+        """Generate output file path and store in appropriate attribute"""
+        # Create a safe filename
         if self.video_metadata and 'title' in self.video_metadata:
-            # Remove invalid characters and limit length
-            safe_title = "".join(c for c in self.video_metadata['title'] if c.isalnum() or c in " -_").strip()
-            safe_title = safe_title[:50]  # Limit length
+            safe_title = "".join(c for c in self.video_metadata['title'] if c.isalnum() or c in " -_").strip()[:50]
             filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.md"
         else:
             filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
         
-        output_file = Path(".") / "docs" / output_type / filename
-        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(".") / "docs" / output_type
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / filename
         
-        # Store the output file path for later reference
-        self.output_file_path = str(output_file)
-        
-        return self.output_file_path
+        # Store path based on type
+        if output_type == "report":
+            self.report_path = str(output_file)
+        else:
+            self.summary_path = str(output_file)
+            
+        return str(output_file)
+
+    @property
+    def output_files(self) -> list[str]:
+        """Get all generated files in order: [summary, report]"""
+        files = []
+        if self.summary_path:
+            files.append(self.summary_path)
+        if self.report_path:
+            files.append(self.report_path)
+        return files
 
     @task
     def create_summary_task(self) -> Task:

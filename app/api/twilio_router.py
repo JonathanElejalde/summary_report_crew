@@ -21,58 +21,106 @@ def normalize_whatsapp_number(raw_number: str) -> str:
 
 def format_response(result: Dict[str, Any]) -> str:
     """Convert analysis result to clean WhatsApp message with titles and links"""
+    if not isinstance(result, dict):
+        return "❌ Invalid analysis result format"
+    
     if result.get('status') != 'success':
-        return "❌ Analysis failed. Please try again."
+        return f"❌ Analysis failed: {result.get('error', 'Unknown error')}"
 
     response = []
     
     # Single video analysis
     if result.get('type') == 'single':
-        title = result.get('metadata', {}).get('title', 'Your Video Analysis')
+        metadata = result.get('metadata', {})
+        title = metadata.get('title', 'Video Analysis')
         response.append(f"*{title}*")
         
-        # For single video analysis, we might not have drive_links
-        # Instead, use file_path from metadata or content preview
-        file_path = result.get('metadata', {}).get('file_path', '')
-        if file_path:
-            response.append(f"Analysis saved to: {file_path}")
-        elif 'content' in result:
-            # Add a preview of the content
-            preview = result['content'][:200] + "..." if len(result['content']) > 200 else result['content']
-            response.append(f"Analysis: {preview}")
-        else:
-            response.append("Analysis complete.")
+        if 'drive_links' in result:
+            response.extend(_format_drive_links(result['drive_links']))
+        elif metadata.get('file_path'):
+            response.append(f"📎 Analysis saved to: {metadata['file_path']}")
     
-    # Batch analysis - keep existing code for completeness
-    elif result.get('type') == 'batch' and 'drive_links' in result:
+    # Batch analysis
+    elif result.get('type') == 'batch':
         response.append("*Batch Analysis Results*")
-        for summary in result['drive_links'].get('summaries', []):
-            if isinstance(summary, dict) and 'title' in summary and 'link' in summary:
-                response.append(f"- {summary['title']}: {summary['link']}")
-            elif isinstance(summary, str):
-                response.append(f"- {summary}")
         
-        if 'final_report' in result['drive_links']:
-            final_report = result['drive_links']['final_report']
-            if isinstance(final_report, dict) and 'link' in final_report:
-                response.append(f"\nFinal Report: {final_report['link']}")
-            elif isinstance(final_report, str):
-                response.append(f"\nFinal Report: {final_report}")
+        if 'drive_links' in result:
+            response.extend(_format_batch_links(result['drive_links']))
+        
+        if 'statistics' in result:
+            response.extend(_format_statistics(result['statistics']))
     
-    # Scheduled jobs
+    # Scheduled analysis
     elif result.get('scheduled'):
-        response.append(f"✅ Scheduled: {result.get('next_run', '')}")
+        response.append("✅ Analysis scheduled")
+        if 'next_run' in result:
+            response.append(f"⏰ Next run: {result['next_run']}")
     
-    # Fallback for any other result type
+    # Unknown type fallback
     else:
-        # Add a simple success message with any available info
-        if 'content' in result:
-            preview = result['content'][:200] + "..." if len(result['content']) > 200 else result['content']
-            response.append(f"Analysis complete. Preview: {preview}")
-        else:
-            response.append("Analysis complete.")
+        response.append("✅ Analysis complete")
+    
+    return "\n".join(response) if response else "✅ Analysis complete"
 
-    return "\n".join(response)
+def _format_drive_links(drive_links: Dict[str, list]) -> list:
+    """Format drive links for single video analysis"""
+    formatted = []
+    
+    for summary in drive_links.get('summaries', []):
+        if isinstance(summary, dict):
+            formatted.append(f"📄 Summary: {summary.get('link', 'N/A')}")
+        elif isinstance(summary, str):
+            formatted.append(f"📄 Summary: {summary}")
+    
+    for report in drive_links.get('reports', []):
+        if isinstance(report, dict):
+            formatted.append(f"📊 Report: {report.get('link', 'N/A')}")
+        elif isinstance(report, str):
+            formatted.append(f"📊 Report: {report}")
+            
+    return formatted
+
+def _format_batch_links(drive_links: Dict[str, list]) -> list:
+    """Format drive links for batch analysis"""
+    formatted = []
+    
+    # Handle summaries
+    summaries = drive_links.get('summaries', [])
+    if summaries:
+        formatted.append("\n📄 *Summaries:*")
+        for summary in summaries:
+            if isinstance(summary, dict):
+                formatted.append(f"- {summary.get('title', 'Analysis')}: {summary.get('link', 'N/A')}")
+            elif isinstance(summary, str):
+                formatted.append(f"- {summary}")
+    
+    # Handle reports
+    reports = drive_links.get('reports', [])
+    if reports:
+        formatted.append("\n📊 *Reports:*")
+        for report in reports:
+            if isinstance(report, dict):
+                formatted.append(f"- {report.get('title', 'Analysis')}: {report.get('link', 'N/A')}")
+            elif isinstance(report, str):
+                formatted.append(f"- {report}")
+    
+    # Handle final report - make it more prominent
+    final_report = drive_links.get('final_report')
+    if final_report:
+        formatted.append("\n🌟 *Final Analysis:*")
+        if isinstance(final_report, dict):
+            formatted.append(f"{final_report.get('link', 'N/A')}")
+        elif isinstance(final_report, str):
+            formatted.append(f"{final_report}")
+    
+    return formatted
+
+def _format_statistics(stats: Dict[str, Any]) -> list:
+    """Format batch statistics"""
+    return [
+        f"\n📈 Processed {stats.get('total_videos', 0)} videos",
+        f"✅ Success rate: {stats.get('success_rate', 0)*100:.0f}%"
+    ]
 
 async def send_whatsapp_message(user_number: str, message: str):
     """Send message to user with error handling"""
@@ -84,22 +132,28 @@ async def send_whatsapp_message(user_number: str, message: str):
         )
     except Exception as e:
         print(f"Failed to send WhatsApp message: {str(e)}")
+        raise  # Re-raise to handle in caller
 
 async def process_whatsapp_analysis(user_id: str, user_number: str, message: str, inbound_msg_id: str):
     """Background task to handle analysis and send result"""
     with UserRepository() as repo:
+        # Process analysis
         try:
-            # Process analysis
             result = handle_analysis_request({
                 "text": message,
                 "user_id": user_id,
                 "platform": "whatsapp"
             })
-            
-            # Format response
+        except Exception as e:
+            await _handle_analysis_error(repo, user_id, user_number, str(e))
+            return
+
+        # Format and send response
+        try:
             response_text = format_response(result)
+            await send_whatsapp_message(user_number, response_text)
             
-            # Save outgoing message - without any context field
+            # Save successful message
             outgoing_msg = WhatsAppMessage(
                 user_id=user_id,
                 direction='outbound',
@@ -109,25 +163,29 @@ async def process_whatsapp_analysis(user_id: str, user_number: str, message: str
             repo.db.add(outgoing_msg)
             repo.db.commit()
             
-            # Send response
-            await send_whatsapp_message(user_number, response_text)
-
         except Exception as e:
-            error_msg = f"⚠️ Analysis failed: {str(e)}"
-            print(f"Analysis error: {str(e)}")
-            
-            # Save error message - without any context field
-            outgoing_msg = WhatsAppMessage(
-                user_id=user_id,
-                direction='outbound',
-                body=error_msg,
-                status=MessageStatus.FAILED
-            )
-            repo.db.add(outgoing_msg)
-            repo.db.commit()
-            
-            # Send error notification
-            await send_whatsapp_message(user_number, error_msg)
+            await _handle_analysis_error(repo, user_id, user_number, str(e))
+
+async def _handle_analysis_error(repo: UserRepository, user_id: str, user_number: str, error: str):
+    """Handle errors in analysis process"""
+    error_msg = f"⚠️ Analysis failed: {error}"
+    print(f"Analysis error: {error}")
+    
+    # Save error message
+    outgoing_msg = WhatsAppMessage(
+        user_id=user_id,
+        direction='outbound',
+        body=error_msg,
+        status=MessageStatus.FAILED
+    )
+    repo.db.add(outgoing_msg)
+    repo.db.commit()
+    
+    # Attempt to send error notification
+    try:
+        await send_whatsapp_message(user_number, error_msg)
+    except Exception as e:
+        print(f"Failed to send error message: {e}")
 
 @router.post("/webhook")
 async def handle_whatsapp(request: Request, background_tasks: BackgroundTasks):

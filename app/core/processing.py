@@ -17,7 +17,7 @@ def _format_metadata(result, video_info):
         "file_path": result.get("file_path")
     }
 
-def _process_single_video(params, youtube_search):
+def _process_single_video(params, youtube_search: YouTubeSearch):
     video_info = youtube_search.get_video_by_url(params.url)
     if not video_info:
         return {"status": "error", "message": "Video not found"}
@@ -26,23 +26,9 @@ def _process_single_video(params, youtube_search):
     return {
         "status": "success",
         "type": "single",
-        "content": result["content"],
-        "metadata": _format_metadata(result, video_info)
+        "metadata": _format_metadata(result, video_info),
+        "drive_links": result.get("drive_links", {})  # Include drive links from analyze_video
     }
-
-def _handle_drive_upload(batch, report, drive_manager):
-    try:
-        folder_ids = drive_manager.setup_folder_structure()
-        uploaded_files = drive_manager.upload_analysis_files(batch, folder_ids)
-        final_report = drive_manager.upload_final_report(report, folder_ids)
-        
-        return {
-            "summaries": [f["link"] for f in uploaded_files.get("summaries", [])],
-            "reports": [f["link"] for f in uploaded_files.get("reports", [])],
-            "final_report": final_report["link"] if final_report else None
-        }
-    except Exception as e:
-        return {"error": str(e)}
     
 
 def _process_search_query(params, youtube_search, drive_manager):
@@ -57,14 +43,11 @@ def _process_search_query(params, youtube_search, drive_manager):
         return {"status": "error", "message": "No videos found"}
 
     batch = process_video_batch(videos, params.analysis_type, params.query)
-    report = FinalReportGenerator().generate_final_report(batch, params.query, params.analysis_type)
     
-    drive_links = _handle_drive_upload(batch, report, drive_manager)
     return {
         "status": "success",
         "type": "batch",
-        "preview": report["content"][:500] + "..." if report["content"] else "",
-        "drive_links": drive_links,
+        "drive_links": batch.get_drive_links(),  # We need to add this method to BatchResults
         "statistics": batch.get_statistics()
     }
 

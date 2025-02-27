@@ -2,11 +2,13 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 from pathlib import Path
+import os
 
 from app.crew.crew import VideoAnalysisCrew
 from app.crew.tools.youtube_tools import YouTubeComments, YouTubeTranscript
 from app.services.youtube_search import YouTubeSearch
-
+from app.services.google_drive import GoogleDriveManager
+from app.services.report_generator import FinalReportGenerator
 class BatchResults:
     """
     Class to store and manage batch processing results.
@@ -93,6 +95,21 @@ class BatchResults:
         
         return str(metadata_file)
 
+    def get_drive_links(self) -> Dict[str, list]:
+        """Collect all drive links from successful results"""
+        all_links = {
+            "summaries": [],
+            "reports": [],
+            "final_report": []
+        }
+        
+        for result in self.get_successful_results():
+            if "drive_links" in result:
+                for link_type in ["summaries", "reports"]:
+                    all_links[link_type].extend(result["drive_links"].get(link_type, []))
+        
+        return all_links
+
 
 def collect_video_data(url: str) -> tuple[str, List[Dict[str, Any]]]:
     """
@@ -129,8 +146,126 @@ def collect_video_data(url: str) -> tuple[str, List[Dict[str, Any]]]:
     return transcript, comments
 
 
-def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str = "report") -> Dict[str, Any]:
-    """Synchronous video analysis"""
+def cleanup_files(file_paths: List[str]) -> None:
+    """Remove local files after successful upload."""
+    print("\n=== Starting cleanup_files ===")
+    for file_path in file_paths:
+        print(f"\nAttempting to cleanup: {file_path}")
+        try:
+            path = Path(file_path)
+            if path.exists():
+                path.unlink()
+                print(f"Successfully deleted file: {file_path}")
+                
+                # Try to remove parent directory if empty
+                parent_dir = path.parent
+                if parent_dir.exists() and not any(parent_dir.iterdir()):
+                    parent_dir.rmdir()
+                    print(f"Removed empty directory: {parent_dir}")
+            else:
+                print(f"File already deleted: {file_path}")
+                
+        except Exception as e:
+            print(f"Cleanup error for {file_path}: {e}")
+
+
+def upload_analysis_files(video_info: Dict[str, Any], crew_manager: VideoAnalysisCrew, cleanup: bool = True) -> Dict[str, Any]:
+    """Upload analysis files to Drive and return links"""
+    print("\n=== Starting upload_analysis_files ===")
+    print(f"Output files to process: {crew_manager.output_files}")
+    
+    drive_manager = GoogleDriveManager()
+    folder_ids = drive_manager.setup_folder_structure()
+    
+    drive_links = {
+        "summaries": [],
+        "reports": []
+    }
+    
+    successful_uploads = []
+
+    # Upload only existing files
+    for file_path in crew_manager.output_files:
+        print(f"\nProcessing file: {file_path}")
+        path = Path(file_path)
+        
+        if not path.exists():
+            print(f"File does not exist: {file_path}")
+            continue
+                
+        try:
+            file_type = "summaries" if "/summary/" in file_path else "reports"
+            print(f"Detected file type: {file_type}")
+            
+            upload_result = drive_manager.upload_file(file_path, folder_ids[file_type])
+            print(f"Upload result: {upload_result}")
+            
+            if upload_result and 'id' in upload_result:
+                drive_links[file_type].append({
+                    "title": video_info.get("title", "Analysis"),
+                    "link": f"https://drive.google.com/file/d/{upload_result['id']}/view"
+                })
+                successful_uploads.append(file_path)
+                print(f"Added to successful uploads: {file_path}")
+        except Exception as e:
+            print(f"Upload error for {file_path}: {e}")
+            continue
+    
+    print(f"\nSuccessful uploads: {successful_uploads}")
+    print(f"Final drive_links: {drive_links}")
+    
+    # Clean up files only after all uploads are complete and if cleanup is requested
+    if successful_uploads and cleanup:
+        print("\nStarting cleanup...")
+        cleanup_files(successful_uploads)
+        print("Cleanup complete")
+    
+    return drive_links
+
+
+def upload_final_report(final_report: Dict[str, Any]) -> Dict[str, Any]:
+    """Upload final report to Drive and return link"""
+    print("\n=== Starting upload_final_report ===")
+    
+    if final_report.get("status") != "success" or not final_report.get("file_path"):
+        print(f"No valid final report to upload: {final_report.get('status')}")
+        return None
+    
+    file_path = final_report.get("file_path")
+    path = Path(file_path)
+    
+    if not path.exists():
+        print(f"Final report file does not exist: {file_path}")
+        return None
+    
+    try:
+        drive_manager = GoogleDriveManager()
+        folder_ids = drive_manager.setup_folder_structure()
+        
+        # Create a custom name for the final report
+        custom_name = f"{datetime.now().strftime('%Y%m%d')}_{final_report.get('query', 'Analysis')}_final.md"
+        
+        # Upload the file
+        upload_result = drive_manager.upload_file(file_path, folder_ids["final"], custom_name)
+        print(f"Final report upload result: {upload_result}")
+        
+        if upload_result and 'id' in upload_result:
+            # Clean up the file after successful upload
+            cleanup_files([file_path])
+            
+            return {
+                "title": final_report.get("query", "Final Analysis"),
+                "link": f"https://drive.google.com/file/d/{upload_result['id']}/view"
+            }
+        
+    except Exception as e:
+        print(f"Final report upload error: {e}")
+    
+    return None
+
+
+def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str = "report", cleanup: bool = True) -> Dict[str, Any]:
+    """Analyze a single video and generate report/summary"""
     try:
         transcript, comments = collect_video_data(video_url)
         
@@ -140,23 +275,36 @@ def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str
             video_metadata=video_info
         )
         
+        # Run analysis
+        # TODO: think about how to handle the output of the crew
         result = crew_manager.analysis_crew().kickoff(
             inputs={
                 'transcript': transcript,
                 'comments': comments,
-                'user_prompt': f"Analyze the comments and provide a {analysis_type} of the video",
-                'video_metadata': video_info
+                'user_prompt': f"Analyze this video and provide a {analysis_type}"
             }
         )
+
+        # Upload files and get links, but don't clean up yet if cleanup=False
+        drive_links = upload_analysis_files(video_info, crew_manager, cleanup=cleanup)
+        
+        # Store file paths for later cleanup if needed
+        file_paths = [path for path in crew_manager.output_files if Path(path).exists()]
         
         return {
-            "content": result,
-            "video_info": video_info,
-            "file_path": crew_manager.output_file_path,
-            "analysis_type": analysis_type,
-            "status": "success"
+            "status": "success",
+            "type": "single",
+            "drive_links": drive_links,
+            "file_paths": file_paths,  # Store for later cleanup
+            "metadata": {
+                "title": video_info.get("title"),
+                "channel": video_info.get("channel_title"),
+                "views": video_info.get("view_count"),
+                "analysis_type": analysis_type
+            }
         }
     except Exception as e:
+        print(f"Analysis error: {str(e)}")
         return {
             "video_url": video_url,
             "error": str(e),
@@ -164,15 +312,38 @@ def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str
         }
 
 def process_video_batch(videos: List[Dict[str, Any]], analysis_type: str = "summary", query: Optional[str] = None) -> BatchResults:
-    """Synchronous batch processing"""
+    """Synchronous batch processing with final report generation"""
     batch = BatchResults(query=query)
     
     for video in videos:
-        result = analyze_video(video['url'], video, analysis_type)
+        # Pass cleanup=False to prevent immediate file deletion
+        result = analyze_video(video['url'], video, analysis_type, cleanup=False)
         batch.add_result(result)
     
     batch.complete_batch()
     batch.save_metadata()
+    
+    # Generate final report
+    final_report_link = None
+    if len(batch.get_successful_results()) > 0:
+        print("\n📊 Generating final report...")
+        report_generator = FinalReportGenerator()
+        final_report = report_generator.generate_final_report(batch, query, analysis_type)
+        
+        # Upload final report
+        if final_report.get("status") == "success":
+            final_report_link = upload_final_report(final_report)
+            if final_report_link:
+                # Add final report link to batch results
+                drive_links = batch.get_drive_links()
+                drive_links["final_report"] = final_report_link
+    
+    # Now that the final report is generated, clean up the individual analysis files
+    print("\n🧹 Cleaning up individual analysis files...")
+    for result in batch.get_successful_results():
+        if "file_paths" in result:
+            cleanup_files(result["file_paths"])
+    
     return batch
 
 
