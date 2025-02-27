@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from dotenv import load_dotenv
 import agentops
 import os
-from app.api.agent import router as analysis_router
+from app.api.agent_router import router as analysis_router
 from app.api.twilio_router import router as twilio_router
 # Load environment variables first
 load_dotenv()

@@ -70,9 +70,8 @@ async def _handle_scheduled_request(request: AnalysisRequest, params: UserQueryP
 def process_and_store_result(task_id: str, user_input: str, user_id: str):
     """Background task handler"""
     try:
-        result = handle_analysis_request(user_input)
-        # Store result in database/filesystem here
-        # For now, we'll just log it
+        handle_analysis_request(user_input)
+
         print(f"Task {task_id} completed for user {user_id}")
     except Exception as e:
         print(f"Task {task_id} failed: {str(e)}")
