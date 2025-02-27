@@ -22,7 +22,7 @@ class WhatsAppMessage(Base):
     body = Column(String)
     media_urls = Column(JSON)
     status = Column(
-        SqlEnum(MessageStatus, name="message_status"), 
+        SqlEnum(MessageStatus, name="message_status", values_callable=lambda obj: [e.value for e in obj]),
         default=MessageStatus.RECEIVED,
         nullable=False
     )
