@@ -88,6 +88,10 @@ def parse_user_query(user_input: str, model: str = "gpt-4o-mini") -> UserQueryPa
         - Preferred time is converted to 24-hour format (HH:MM)
         - If no preferred time is specified in a scheduling request, defaults to "00:00"
     """
+    # Add logging at the beginning
+    print("\n==== Parsing User Query ====")
+    print(f"Input text: {user_input}")
+    
     # Initialize the parser with our Pydantic model
     parser = PydanticOutputParser(pydantic_object=UserQueryParams)
     
@@ -148,11 +152,16 @@ Examples:
     
     # Parse the response into our Pydantic model
     try:
-        return parser.parse(response)
+        params = parser.parse(response)
     except Exception as e:
         # Fallback to default values if parsing fails
         print(f"Error parsing query parameters: {e}")
-        return UserQueryParams(query=user_input)
+        params = UserQueryParams(query=user_input)
+    
+    # Add logging at the end
+    print(f"Parsed parameters: URL={params.url}, Query={params.query}, Analysis={params.analysis_type}, Date={params.date_filter}, Views={params.views_filter}, Scheduled={params.is_scheduled}")
+    
+    return params
     
 if __name__ == "__main__":
     # Test regular queries
