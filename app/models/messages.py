@@ -18,8 +18,8 @@ class WhatsAppMessage(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id = Column(String, ForeignKey('users.id', ondelete='CASCADE'))
-    direction = Column(String, index=True)  # 'inbound' or 'outbound'
-    body = Column(String)
+    user_message = Column(String, nullable=True)
+    agent_message = Column(String, nullable=True)
     media_urls = Column(JSON)
     status = Column(
         SqlEnum(MessageStatus, name="message_status", values_callable=lambda obj: [e.value for e in obj]),

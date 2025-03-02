@@ -14,6 +14,43 @@ router = APIRouter()
 drive_manager = GoogleDriveManager()
 client = Client(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN'))
 
+
+async def _handle_analysis_error(repo: UserRepository, user_id: str, user_number: str, error: str, inbound_msg_id: str = None):
+    """Handle errors in analysis process"""
+    error_msg = f"⚠️ Analysis failed: {error}"
+    print(f"Analysis error: {error}")
+    
+    if inbound_msg_id:
+        # Try to update the original message
+        message_to_update = repo.db.get(WhatsAppMessage, inbound_msg_id)
+        if message_to_update:
+            message_to_update.agent_message = error_msg
+            message_to_update.status = MessageStatus.FAILED
+            repo.db.commit()
+            
+            # Attempt to send error notification
+            try:
+                await send_whatsapp_message(user_number, error_msg)
+            except Exception as e:
+                print(f"Failed to send error message: {e}")
+            return
+    
+    # If we couldn't find the original message or no ID was provided, create a new one
+    outgoing_msg = WhatsAppMessage(
+        user_id=user_id,
+        agent_message=error_msg,
+        status=MessageStatus.FAILED
+    )
+    repo.db.add(outgoing_msg)
+    repo.db.commit()
+    
+    # Attempt to send error notification
+    try:
+        await send_whatsapp_message(user_number, error_msg)
+    except Exception as e:
+        print(f"Failed to send error message: {e}")
+
+
 def normalize_whatsapp_number(raw_number: str) -> str:
     """Convert to E.164 format without 'whatsapp:' prefix"""
     cleaned = re.sub(r"[^+0-9]", "", raw_number.replace('whatsapp:', ''))
@@ -164,7 +201,7 @@ async def process_whatsapp_analysis(user_id: str, user_number: str, message: str
                 "platform": "whatsapp"
             })
         except Exception as e:
-            await _handle_analysis_error(repo, user_id, user_number, str(e))
+            await _handle_analysis_error(repo, user_id, user_number, str(e), inbound_msg_id)
             return
 
         # Format and send response
@@ -172,39 +209,26 @@ async def process_whatsapp_analysis(user_id: str, user_number: str, message: str
             response_text = format_response(result)
             await send_whatsapp_message(user_number, response_text)
             
-            # Save successful message
-            outgoing_msg = WhatsAppMessage(
-                user_id=user_id,
-                direction='outbound',
-                body=response_text,
-                status=MessageStatus.SENT
-            )
-            repo.db.add(outgoing_msg)
-            repo.db.commit()
+            # Get the message by ID and update it with the agent's response
+            message_to_update = repo.db.get(WhatsAppMessage, inbound_msg_id)
+            if message_to_update:
+                message_to_update.agent_message = response_text
+                message_to_update.status = MessageStatus.SENT
+                repo.db.commit()
+            else:
+                # Fallback in case the message can't be found
+                print(f"Warning: Could not find message with ID {inbound_msg_id}")
+                new_msg = WhatsAppMessage(
+                    user_id=user_id,
+                    agent_message=response_text,
+                    status=MessageStatus.SENT
+                )
+                repo.db.add(new_msg)
+                repo.db.commit()
             
         except Exception as e:
-            await _handle_analysis_error(repo, user_id, user_number, str(e))
+            await _handle_analysis_error(repo, user_id, user_number, str(e), inbound_msg_id)
 
-async def _handle_analysis_error(repo: UserRepository, user_id: str, user_number: str, error: str):
-    """Handle errors in analysis process"""
-    error_msg = f"⚠️ Analysis failed: {error}"
-    print(f"Analysis error: {error}")
-    
-    # Save error message
-    outgoing_msg = WhatsAppMessage(
-        user_id=user_id,
-        direction='outbound',
-        body=error_msg,
-        status=MessageStatus.FAILED
-    )
-    repo.db.add(outgoing_msg)
-    repo.db.commit()
-    
-    # Attempt to send error notification
-    try:
-        await send_whatsapp_message(user_number, error_msg)
-    except Exception as e:
-        print(f"Failed to send error message: {e}")
 
 @router.post("/webhook")
 async def handle_whatsapp(request: Request, background_tasks: BackgroundTasks):
@@ -212,7 +236,6 @@ async def handle_whatsapp(request: Request, background_tasks: BackgroundTasks):
     raw_number = form_data.get('From', '')
     message_body = form_data.get('Body', '').strip()
     
-    # try:
     user_number = normalize_whatsapp_number(raw_number)
     
     with UserRepository() as repo:
@@ -221,8 +244,7 @@ async def handle_whatsapp(request: Request, background_tasks: BackgroundTasks):
         # Save incoming message
         incoming_msg = WhatsAppMessage(
             user_id=user.id,
-            direction='inbound',
-            body=message_body,
+            user_message=message_body,
             status=MessageStatus.RECEIVED
         )
         repo.db.add(incoming_msg)
@@ -239,10 +261,3 @@ async def handle_whatsapp(request: Request, background_tasks: BackgroundTasks):
         
         return {"status": "processing", "message": "Analysis started"}
             
-    # except Exception as e:
-    #     error_msg = "⚠️ Initial processing failed. Please try again."
-    #     print(f"Webhook error: {str(e)}")
-    #     await send_whatsapp_message(user_number, error_msg)
-    #     raise HTTPException(status_code=500, detail=str(e))
-
-
