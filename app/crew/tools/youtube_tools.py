@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pytubefix import YouTube
 import whisper
 import tempfile
-import torch
+#import torch
 import re
 import yt_dlp
 
@@ -273,12 +273,14 @@ class YouTubeTranscript:
             print("Transcribing with Whisper...")
             # Only initialize the model when needed. Most of the times we won't need it.
             if self.device is None:
-                self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                #self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                self.device = "cpu"
             model = whisper.load_model(self.model_size, device=self.device)
 
             result = model.transcribe(
                 audio_path,
-                fp16=torch.cuda.is_available(),
+                #fp16=torch.cuda.is_available(),
+                fp16=False,
                 language='en',
             )
             return result["text"]
@@ -400,12 +402,14 @@ class YouTubeTranscript:
                 print("Transcribing yt-dlp audio with Whisper...")
                 # Only initialize the model when needed. Most of the times we won't need it.
                 if self.device is None:
-                    self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                    #self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                    self.device = "cpu"
                 model = whisper.load_model(self.model_size, device=self.device)
 
                 result = model.transcribe(
                     audio_path,
-                    fp16=torch.cuda.is_available(),
+                    #fp16=torch.cuda.is_available(),
+                    fp16=False,
                     language='en',
                 )
                 return {"source": "whisper_ytdlp", "text": result["text"]}

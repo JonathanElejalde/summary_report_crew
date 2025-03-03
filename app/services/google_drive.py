@@ -296,7 +296,7 @@ class GoogleDriveManager:
             custom_name = f"{custom_name}.md"
         
         # Upload the file with conversion to Google Docs
-        return self.upload_file(file_path, folder_id, custom_name, convert_to_gdoc=True)
+        return self.upload_file(file_path, folder_id, custom_name)
     
     def _sanitize_filename(self, filename: str) -> str:
         """

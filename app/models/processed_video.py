@@ -21,9 +21,3 @@ class ProcessedVideo(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     
-    # Add a unique constraint to prevent duplicate processing for the same user
-    __table_args__ = (
-        # Ensure a user doesn't process the same video twice
-        # This allows different users to process the same video
-        {'sqlite_autoincrement': True},
-    )
