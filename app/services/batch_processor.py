@@ -2,13 +2,15 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 from pathlib import Path
-import os
 
 from app.crew.crew import VideoAnalysisCrew
 from app.crew.tools.youtube_tools import YouTubeComments, YouTubeTranscript
 from app.services.youtube_search import YouTubeSearch
 from app.services.google_drive import GoogleDriveManager
 from app.services.report_generator import FinalReportGenerator
+from app.models.database import get_db
+from app.repositories.processed_video import ProcessedVideoRepository
+
 class BatchResults:
     """
     Class to store and manage batch processing results.
@@ -275,7 +277,7 @@ def upload_final_report(final_report: Dict[str, Any]) -> Dict[str, Any]:
     return None
 
 
-def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str = "report", cleanup: bool = True) -> Dict[str, Any]:
+def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str = "report", cleanup: bool = True, user_id: str = None, message_id: str = None) -> Dict[str, Any]:
     """Analyze a single video and generate report/summary"""
     try:
         transcript, comments = collect_video_data(video_url)
@@ -301,6 +303,26 @@ def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str
         
         # Store file paths for later cleanup if needed
         file_paths = [path for path in crew_manager.output_files if Path(path).exists()]
+        
+        # After successful analysis and before returning the result
+        if user_id and video_info.get('id'):
+            try:
+                db = next(get_db())
+                repo = ProcessedVideoRepository(db)
+                
+                # Save the processed video using the repository
+                repo.create(
+                    user_id=user_id,
+                    video_id=video_info['id'],
+                    title=video_info.get('title'),
+                    url=video_url,
+                    thumbnail_url=video_info.get('thumbnail_url'),
+                    duration=video_info.get('duration'),
+                    message_id=message_id
+                )
+            except Exception as e:
+                # Log the error but don't fail the processing
+                print(f"Error saving processed video: {str(e)}")
         
         return {
             "status": "success",
@@ -328,15 +350,15 @@ def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str
             "status": "error"
         }
 
-def process_video_batch(videos: List[Dict[str, Any]], analysis_type: str = "summary", query: Optional[str] = None) -> BatchResults:
+def process_video_batch(videos: List[Dict[str, Any]], analysis_type: str = "summary", query: Optional[str] = None, user_id: str = None, message_id: str = None) -> BatchResults:
     """Synchronous batch processing with final report generation"""
     batch = BatchResults(query=query)
     
     for video in videos:
         # Pass cleanup=False to prevent immediate file deletion
-        result = analyze_video(video['url'], video, analysis_type, cleanup=False)
+        result = analyze_video(video['url'], video, analysis_type, cleanup=False, user_id=user_id, message_id=message_id)
         batch.add_result(result)
-    
+
     batch.complete_batch()
     batch.save_metadata()
     

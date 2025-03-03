@@ -5,7 +5,12 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from app.crew.tools.youtube_tools import extract_video_id
 
+
 class YouTubeSearch:
+    YOUTUBE_SEARCH_MAX_RESULTS = int(os.getenv("YOUTUBE_SEARCH_MAX_RESULTS", 50))
+    MIN_DURATION_MINUTES = int(os.getenv("MIN_DURATION_MINUTES", 10))
+    MAX_DURATION_MINUTES = int(os.getenv("MAX_DURATION_MINUTES", 150))
+
     """
     Class for searching and filtering YouTube videos.
     
@@ -92,7 +97,7 @@ class YouTubeSearch:
         return hours * 3600 + minutes * 60 + seconds
     
     
-    def search_videos(self, query: str, date_filter: str = "24 hours", max_results: int = 10, 
+    def search_videos(self, query: str, date_filter: str = "24 hours", 
                      video_duration: str = "any") -> List[Dict[str, Any]]:
         """
         Search for YouTube videos based on query and date filter.
@@ -103,7 +108,6 @@ class YouTubeSearch:
         Args:
             query (str): Search query for finding videos
             date_filter (str): Time frame filter (e.g., "24 hours", "week", "month")
-            max_results (int): Maximum number of results to return (default: 10)
             video_duration (str): Duration filter ('any', 'short', 'medium', 'long')
                                  short: < 4 min, medium: 4-20 min, long: > 20 min
             
@@ -127,7 +131,7 @@ class YouTubeSearch:
                 videoDuration=video_duration,  # Add duration filter
                 order="relevance",
                 publishedAfter=published_after,
-                maxResults=max_results
+                maxResults=self.YOUTUBE_SEARCH_MAX_RESULTS
             ).execute()
             
             # Extract video information from search results
@@ -270,9 +274,8 @@ class YouTubeSearch:
         return filtered_videos
     
     def search_and_filter(self, query: str, date_filter: str = "24 hours", 
-                         min_views: int = 5000, max_results: int = 5,
-                         min_duration_minutes: int = 10,
-                         max_duration_hours: float = 2.5) -> List[Dict[str, Any]]:
+                         min_views: int = 5000, max_results: int = 3,
+                         exclude_video_ids: List[str] = None) -> List[Dict[str, Any]]:
         """
         Search for videos and filter by view count and duration in one operation.
         
@@ -283,19 +286,18 @@ class YouTubeSearch:
             query (str): Search query for finding videos
             date_filter (str): Time frame filter (e.g., "24 hours", "week", "month")
             min_views (int): Minimum view count for filtering (default: 5000)
-            max_results (int): Maximum number of final results to return (default: 5)
-            min_duration_minutes (int): Minimum duration in minutes (default: 10)
-            max_duration_hours (float): Maximum duration in hours (default: 2.5)
+            max_results (int): Maximum number of final results to return (default: 3)
+            exclude_video_ids (List[str]): List of video IDs to exclude from results
             
         Returns:
             List[Dict[str, Any]]: Filtered list of video metadata dictionaries
         """
         # Get search results sorted by relevance
-        search_results = self.search_videos(query, date_filter, max_results=50, video_duration="any")
+        search_results = self.search_videos(query, date_filter, video_duration="any")
         
         # Define our duration range in seconds
-        min_seconds = min_duration_minutes * 60
-        max_seconds = max_duration_hours * 3600
+        min_seconds = self.MIN_DURATION_MINUTES * 60
+        max_seconds = self.MAX_DURATION_MINUTES * 3600
         
         # Process videos in batches to minimize API calls
         filtered_videos = []
@@ -338,6 +340,11 @@ class YouTubeSearch:
                         # If we have enough videos, stop processing
                         if len(filtered_videos) >= max_results:
                             break
+        
+        # Add filtering for already processed videos
+        if exclude_video_ids:
+            filtered_videos = [video for video in filtered_videos 
+                              if video['id'] not in exclude_video_ids]
         
         return filtered_videos
 

@@ -2,16 +2,13 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from twilio.rest import Client
 import os
 import re
+import requests
 from typing import Dict, Any
 from app.models import WhatsAppMessage, MessageStatus
 from app.repositories.user import UserRepository
 from app.core.processing import handle_analysis_request
-from app.services.google_drive import GoogleDriveManager
-from app.repositories.scheduler import SchedulerService
-from uuid import uuid4
 
 router = APIRouter()
-drive_manager = GoogleDriveManager()
 client = Client(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN'))
 
 
@@ -56,6 +53,79 @@ def normalize_whatsapp_number(raw_number: str) -> str:
     cleaned = re.sub(r"[^+0-9]", "", raw_number.replace('whatsapp:', ''))
     return f"+{cleaned.lstrip('+')}"  # Ensure leading +
 
+async def send_whatsapp_message(user_number: str, message: str):
+    """Send message to user with error handling"""
+    try:
+        # Check if message exceeds Twilio's 1600 character limit
+        if len(message) > 1600:
+            print(f"Message exceeds 1600 characters ({len(message)} chars), splitting into multiple messages")
+            
+            # Split message into chunks of 1500 characters (leaving room for continuation indicators)
+            chunks = []
+            current_chunk = ""
+            
+            # Split by newlines to avoid breaking in the middle of a line
+            lines = message.split('\n')
+            
+            for line in lines:
+                # If adding this line would exceed our chunk size
+                if len(current_chunk) + len(line) + 1 > 1500:  # +1 for newline
+                    # If current chunk is not empty, add it to chunks
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                        current_chunk = line + '\n'
+                    else:
+                        # If the line itself is too long, we need to split it
+                        if len(line) > 1500:
+                            # Split the line at 1500 chars
+                            chunks.append(line[:1500])
+                            current_chunk = line[1500:] + '\n'
+                        else:
+                            current_chunk = line + '\n'
+                else:
+                    current_chunk += line + '\n'
+            
+            # Add the last chunk if not empty
+            if current_chunk:
+                chunks.append(current_chunk)
+            
+            # Send each chunk with a continuation indicator
+            for i, chunk in enumerate(chunks):
+                continuation = f"({i+1}/{len(chunks)})"
+                if i < len(chunks) - 1:
+                    chunk += f"\n{continuation}"
+                else:
+                    chunk += f"\n{continuation} End of message."
+                
+                client.messages.create(
+                    body=chunk,
+                    from_=os.getenv('TWILIO_WHATSAPP_NUMBER'),
+                    to=f"whatsapp:{user_number}"
+                )
+        else:
+            # Send as a single message if under the limit
+            client.messages.create(
+                body=message,
+                from_=os.getenv('TWILIO_WHATSAPP_NUMBER'),
+                to=f"whatsapp:{user_number}"
+            )
+    except Exception as e:
+        print(f"Failed to send WhatsApp message: {str(e)}")
+        raise  # Re-raise to handle in caller
+
+def shorten_url(url: str) -> str:
+    """Shorten a URL using TinyURL's API"""
+    try:
+        response = requests.get(f"https://tinyurl.com/api-create.php?url={url}", timeout=5)
+        if response.status_code == 200:
+            return response.text
+        else:
+            print(f"Failed to shorten URL: {url}, status code: {response.status_code}")
+            return url
+    except Exception as e:
+        print(f"Error shortening URL: {str(e)}")
+        return url
+
 def format_response(result: Dict[str, Any]) -> str:
     """Convert analysis result to clean WhatsApp message with titles and links"""
     if not isinstance(result, dict):
@@ -76,6 +146,7 @@ def format_response(result: Dict[str, Any]) -> str:
         response.append(f"*{title}*")
         
         if 'drive_links' in result:
+            # Get formatted titles with shortened URLs
             response.extend(_format_drive_links(result['drive_links']))
         elif metadata.get('file_path'):
             response.append(f"📎 Analysis saved to: {metadata['file_path']}")
@@ -92,6 +163,7 @@ def format_response(result: Dict[str, Any]) -> str:
             else:
                 print("No final_report found in drive_links")
             
+            # Get formatted titles with shortened URLs
             response.extend(_format_batch_links(result['drive_links']))
         else:
             print("No drive_links found in result")
@@ -109,7 +181,10 @@ def format_response(result: Dict[str, Any]) -> str:
     else:
         response.append("✅ Analysis complete")
     
-    return "\n".join(response) if response else "✅ Analysis complete"
+    # Join all response elements
+    full_response = "\n".join(response)
+    
+    return full_response if full_response else "✅ Analysis complete"
 
 def _format_drive_links(drive_links: Dict[str, list]) -> list:
     """Format drive links for single video analysis"""
@@ -117,19 +192,41 @@ def _format_drive_links(drive_links: Dict[str, list]) -> list:
     
     for summary in drive_links.get('summaries', []):
         if isinstance(summary, dict):
-            # Add Google Docs indicator if applicable
-            doc_type = "Google Doc" if summary.get('is_gdoc', False) else "Summary"
-            formatted.append(f"📄 {doc_type}: {summary.get('link', 'N/A')}")
+            # Extract title or use a shorter label
+            title = summary.get('title', 'Summary')
+            link = summary.get('link', 'N/A')
+            
+            # Truncate title if too long
+            if title and len(title) > 30:
+                title = title[:27] + "..."
+                
+            # Shorten the URL
+            short_url = shorten_url(link) if link != 'N/A' else 'N/A'
+            
+            formatted.append(f"📄 *{title}*: {short_url}")
         elif isinstance(summary, str):
-            formatted.append(f"📄 Summary: {summary}")
+            # If it's just a string, assume it's a URL
+            short_url = shorten_url(summary)
+            formatted.append(f"📄 *Summary*: {short_url}")
     
     for report in drive_links.get('reports', []):
         if isinstance(report, dict):
-            # Add Google Docs indicator if applicable
-            doc_type = "Google Doc" if report.get('is_gdoc', False) else "Report"
-            formatted.append(f"📊 {doc_type}: {report.get('link', 'N/A')}")
+            # Extract title or use a shorter label
+            title = report.get('title', 'Report')
+            link = report.get('link', 'N/A')
+            
+            # Truncate title if too long
+            if title and len(title) > 30:
+                title = title[:27] + "..."
+                
+            # Shorten the URL
+            short_url = shorten_url(link) if link != 'N/A' else 'N/A'
+            
+            formatted.append(f"📊 *{title}*: {short_url}")
         elif isinstance(report, str):
-            formatted.append(f"📊 Report: {report}")
+            # If it's just a string, assume it's a URL
+            short_url = shorten_url(report)
+            formatted.append(f"📊 *Report*: {short_url}")
             
     return formatted
 
@@ -140,11 +237,23 @@ def _format_batch_links(drive_links: Dict[str, Any]) -> list:
     # Handle final report FIRST - make it the most prominent
     final_report = drive_links.get('final_report')
     if final_report:
-        formatted.append("\n🌟 *FINAL ANALYSIS:*")
+        formatted.append("\n🌟 *FINAL ANALYSIS*")
         if isinstance(final_report, dict):
-            formatted.append(f"👉 {final_report.get('link', 'N/A')}")
+            title = final_report.get('title', 'Final Report')
+            link = final_report.get('link', 'N/A')
+            
+            # Truncate title if too long
+            if title and len(title) > 30:
+                title = title[:27] + "..."
+                
+            # Shorten the URL
+            short_url = shorten_url(link) if link != 'N/A' else 'N/A'
+            
+            formatted.append(f"👉 *{title}*: {short_url}")
         elif isinstance(final_report, str):
-            formatted.append(f"👉 {final_report}")
+            # If it's just a string, assume it's a URL
+            short_url = shorten_url(final_report)
+            formatted.append(f"👉 *Final Report*: {short_url}")
         
         # Add a separator
         formatted.append("\n-------------------")
@@ -152,22 +261,46 @@ def _format_batch_links(drive_links: Dict[str, Any]) -> list:
     # Handle summaries
     summaries = drive_links.get('summaries', [])
     if summaries:
-        formatted.append("\n📄 *Individual Summaries:*")
-        for summary in summaries:
+        formatted.append("\n📄 *Summaries:*")
+        for i, summary in enumerate(summaries, 1):
             if isinstance(summary, dict):
-                formatted.append(f"- {summary.get('title', 'Analysis')}: {summary.get('link', 'N/A')}")
+                title = summary.get('title', f'Summary {i}')
+                link = summary.get('link', 'N/A')
+                
+                # Truncate title if too long
+                if title and len(title) > 30:
+                    title = title[:27] + "..."
+                    
+                # Shorten the URL
+                short_url = shorten_url(link) if link != 'N/A' else 'N/A'
+                
+                formatted.append(f"- *{title}*: {short_url}")
             elif isinstance(summary, str):
-                formatted.append(f"- {summary}")
+                # If it's just a string, assume it's a URL
+                short_url = shorten_url(summary)
+                formatted.append(f"- *Summary {i}*: {short_url}")
     
     # Handle reports
     reports = drive_links.get('reports', [])
     if reports:
-        formatted.append("\n📊 *Individual Reports:*")
-        for report in reports:
+        formatted.append("\n📊 *Reports:*")
+        for i, report in enumerate(reports, 1):
             if isinstance(report, dict):
-                formatted.append(f"- {report.get('title', 'Analysis')}: {report.get('link', 'N/A')}")
+                title = report.get('title', f'Report {i}')
+                link = report.get('link', 'N/A')
+                
+                # Truncate title if too long
+                if title and len(title) > 30:
+                    title = title[:27] + "..."
+                    
+                # Shorten the URL
+                short_url = shorten_url(link) if link != 'N/A' else 'N/A'
+                
+                formatted.append(f"- *{title}*: {short_url}")
             elif isinstance(report, str):
-                formatted.append(f"- {report}")
+                # If it's just a string, assume it's a URL
+                short_url = shorten_url(report)
+                formatted.append(f"- *Report {i}*: {short_url}")
     
     return formatted
 
@@ -178,28 +311,12 @@ def _format_statistics(stats: Dict[str, Any]) -> list:
         f"✅ Success rate: {stats.get('success_rate', 0)*100:.0f}%"
     ]
 
-async def send_whatsapp_message(user_number: str, message: str):
-    """Send message to user with error handling"""
-    try:
-        client.messages.create(
-            body=message,
-            from_=os.getenv('TWILIO_WHATSAPP_NUMBER'),
-            to=f"whatsapp:{user_number}"
-        )
-    except Exception as e:
-        print(f"Failed to send WhatsApp message: {str(e)}")
-        raise  # Re-raise to handle in caller
-
 async def process_whatsapp_analysis(user_id: str, user_number: str, message: str, inbound_msg_id: str):
     """Background task to handle analysis and send result"""
     with UserRepository() as repo:
         # Process analysis
         try:
-            result = handle_analysis_request({
-                "text": message,
-                "user_id": user_id,
-                "platform": "whatsapp"
-            })
+            result = handle_analysis_request(message, user_id=user_id, message_id=inbound_msg_id)
         except Exception as e:
             await _handle_analysis_error(repo, user_id, user_number, str(e), inbound_msg_id)
             return

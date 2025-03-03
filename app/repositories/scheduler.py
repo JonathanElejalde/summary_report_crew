@@ -1,16 +1,13 @@
 from sqlalchemy.orm import Session
 from app.models.database import SessionLocal
 from app.models.scheduler import ScheduledJob, JobFrequency, JobStatus
-from app.services import GoogleDriveManager
 import logging
 from datetime import datetime, timedelta
-import re
 from typing import List, Optional
 
 class SchedulerService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.drive = GoogleDriveManager()
         self._db: Optional[Session] = None
 
     @property

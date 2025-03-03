@@ -66,7 +66,6 @@ cp .env.example .env
 ```
 Edit the `.env` file and add your API keys:
 - `YOUTUBE_API_KEY`: Get from [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-- `AGENTOPS_API_KEY`: Get from AgentOps dashboard
 - `OPENAI_API_KEY`: Get from OpenAI dashboard
 
 ## Usage 🎮
