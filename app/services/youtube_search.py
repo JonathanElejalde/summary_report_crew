@@ -148,7 +148,6 @@ class YouTubeSearch:
                         "channel_title": snippet["channelTitle"],
                         "published_at": snippet["publishedAt"],
                         "description": snippet["description"],
-                        "thumbnail_url": snippet["thumbnails"]["high"]["url"] if "high" in snippet["thumbnails"] else snippet["thumbnails"]["default"]["url"]
                     })
             
             return videos
@@ -391,7 +390,6 @@ class YouTubeSearch:
                 "channel_title": snippet["channelTitle"],
                 "published_at": snippet["publishedAt"],
                 "description": snippet["description"],
-                "thumbnail_url": snippet["thumbnails"]["high"]["url"] if "high" in snippet["thumbnails"] else snippet["thumbnails"]["default"]["url"],
                 "view_count": int(statistics.get("viewCount", 0)),
                 "like_count": int(statistics.get("likeCount", 0)),
                 "comment_count": int(statistics.get("commentCount", 0)),

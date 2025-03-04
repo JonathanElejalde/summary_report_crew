@@ -316,7 +316,6 @@ def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str
                     video_id=video_info['id'],
                     title=video_info.get('title'),
                     url=video_url,
-                    thumbnail_url=video_info.get('thumbnail_url'),
                     duration=video_info.get('duration'),
                     message_id=message_id
                 )

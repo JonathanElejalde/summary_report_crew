@@ -12,7 +12,7 @@ class ProcessedVideoRepository:
     
     def create(self, user_id: str, video_id: str, message_id: Optional[UUID] = None, 
                title: Optional[str] = None, url: Optional[str] = None,
-               thumbnail_url: Optional[str] = None, duration: Optional[str] = None) -> ProcessedVideo:
+               duration: Optional[str] = None) -> ProcessedVideo:
         """Create a new processed video record"""
         # Check if this video has already been processed for this user
         existing = self.get_by_user_and_video_id(user_id, video_id)
@@ -26,7 +26,6 @@ class ProcessedVideoRepository:
             message_id=message_id,
             title=title,
             url=url,
-            thumbnail_url=thumbnail_url,
             duration=duration
         )
         self.db.add(processed_video)
