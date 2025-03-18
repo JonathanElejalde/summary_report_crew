@@ -315,11 +315,11 @@ async def process_whatsapp_analysis(user_id: str, user_number: str, message: str
     """Background task to handle analysis and send result"""
     with UserRepository() as repo:
         # Process analysis
-        try:
-            result = handle_analysis_request(message, user_id=user_id, message_id=inbound_msg_id)
-        except Exception as e:
-            await _handle_analysis_error(repo, user_id, user_number, str(e), inbound_msg_id)
-            return
+        # try:
+        result = handle_analysis_request(message, user_id=user_id, message_id=inbound_msg_id)
+        # except Exception as e:
+        #     await _handle_analysis_error(repo, user_id, user_number, str(e), inbound_msg_id)
+        #     return
 
         # Format and send response
         try:

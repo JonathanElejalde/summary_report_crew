@@ -142,7 +142,8 @@ def collect_video_data(url: str) -> tuple[str, List[Dict[str, Any]]]:
     print("Getting video transcript...")
     transcript_data = YouTubeTranscript().get_transcript(url)
     if transcript_data["source"] == "error":
-        raise RuntimeError(f"Failed to get transcript: {transcript_data['text']}")
+        print(f"Failed to get transcript: {transcript_data['text']}")
+        return None, None
     transcript = transcript_data["text"]
     
     # Get comments
@@ -279,75 +280,78 @@ def upload_final_report(final_report: Dict[str, Any]) -> Dict[str, Any]:
 
 def analyze_video(video_url: str, video_info: Dict[str, Any], analysis_type: str = "report", cleanup: bool = True, user_id: str = None, message_id: str = None) -> Dict[str, Any]:
     """Analyze a single video and generate report/summary"""
-    try:
-        transcript, comments = collect_video_data(video_url)
-        
-        crew_manager = VideoAnalysisCrew(
-            video_url=video_url,
-            analysis_type=analysis_type,
-            video_metadata=video_info
-        )
-        
-        # Run analysis
-        # TODO: think about how to handle the output of the crew
-        result = crew_manager.analysis_crew().kickoff(
-            inputs={
-                'transcript': transcript,
-                'comments': comments,
-                'user_prompt': f"Analyze this video and provide a {analysis_type}"
-            }
-        )
+    # try:
+    transcript, comments = collect_video_data(video_url)
+    if not transcript:
+        print(f"No transcript found for video: {video_url}")
+        return None
+    
+    crew_manager = VideoAnalysisCrew(
+        video_url=video_url,
+        analysis_type=analysis_type,
+        video_metadata=video_info
+    )
+    
+    # Run analysis
+    # TODO: think about how to handle the output of the crew
+    result = crew_manager.analysis_crew().kickoff(
+        inputs={
+            'transcript': transcript,
+            'comments': comments,
+            'user_prompt': f"Analyze this video and provide a {analysis_type}"
+        }
+    )
 
-        # Upload files and get links, but don't clean up yet if cleanup=False
-        drive_links = upload_analysis_files(video_info, crew_manager, cleanup=cleanup)
-        
-        # Store file paths for later cleanup if needed
-        file_paths = [path for path in crew_manager.output_files if Path(path).exists()]
-        
-        # After successful analysis and before returning the result
-        if user_id and video_info.get('id'):
-            try:
-                db = next(get_db())
-                repo = ProcessedVideoRepository(db)
-                
-                # Save the processed video using the repository
-                repo.create(
-                    user_id=user_id,
-                    video_id=video_info['id'],
-                    title=video_info.get('title'),
-                    url=video_url,
-                    duration=video_info.get('duration'),
-                    message_id=message_id
-                )
-            except Exception as e:
-                # Log the error but don't fail the processing
-                print(f"Error saving processed video: {str(e)}")
-        
-        return {
-            "status": "success",
-            "type": "single",
-            "drive_links": drive_links,
-            "file_paths": file_paths,  # Store for later cleanup
-            "video_info": {  # Add this to match what FinalReportGenerator expects
-                "title": video_info.get("title"),
-                "url": video_url,
-                "channel_title": video_info.get("channel_title"),
-                "view_count": video_info.get("view_count")
-            },
-            "metadata": {
-                "title": video_info.get("title"),
-                "channel": video_info.get("channel_title"),
-                "views": video_info.get("view_count"),
-                "analysis_type": analysis_type
-            }
+    # Upload files and get links, but don't clean up yet if cleanup=False
+    drive_links = upload_analysis_files(video_info, crew_manager, cleanup=cleanup)
+    
+    # Store file paths for later cleanup if needed
+    file_paths = [path for path in crew_manager.output_files if Path(path).exists()]
+    
+    # After successful analysis and before returning the result
+    if user_id and video_info.get('id'):
+        try:
+            db = next(get_db())
+            repo = ProcessedVideoRepository(db)
+            
+            # Save the processed video using the repository
+            repo.create(
+                user_id=user_id,
+                video_id=video_info['id'],
+                title=video_info.get('title'),
+                url=video_url,
+                duration=video_info.get('duration'),
+                message_id=message_id
+            )
+        except Exception as e:
+            # Log the error but don't fail the processing
+            print(f"Error saving processed video: {str(e)}")
+    
+    return {
+        "status": "success",
+        "type": "single",
+        "drive_links": drive_links,
+        "file_paths": file_paths,  # Store for later cleanup
+        "video_info": {  # Add this to match what FinalReportGenerator expects
+            "title": video_info.get("title"),
+            "url": video_url,
+            "channel_title": video_info.get("channel_title"),
+            "view_count": video_info.get("view_count")
+        },
+        "metadata": {
+            "title": video_info.get("title"),
+            "channel": video_info.get("channel_title"),
+            "views": video_info.get("view_count"),
+            "analysis_type": analysis_type
         }
-    except Exception as e:
-        print(f"Analysis error: {str(e)}")
-        return {
-            "video_url": video_url,
-            "error": str(e),
-            "status": "error"
-        }
+    }
+    # except Exception as e:
+    #     print(f"Analysis error: {str(e)}")
+    #     return {
+    #         "video_url": video_url,
+    #         "error": str(e),
+    #         "status": "error"
+    #     }
 
 def process_video_batch(videos: List[Dict[str, Any]], analysis_type: str = "summary", query: Optional[str] = None, user_id: str = None, message_id: str = None) -> BatchResults:
     """Synchronous batch processing with final report generation"""
@@ -356,6 +360,9 @@ def process_video_batch(videos: List[Dict[str, Any]], analysis_type: str = "summ
     for video in videos:
         # Pass cleanup=False to prevent immediate file deletion
         result = analyze_video(video['url'], video, analysis_type, cleanup=False, user_id=user_id, message_id=message_id)
+        if not result:
+            print(f"Skipping video: {video['url']} because of error")
+            continue
         batch.add_result(result)
 
     batch.complete_batch()
